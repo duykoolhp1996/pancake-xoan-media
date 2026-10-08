@@ -139,6 +139,9 @@ export default function App() {
     CrmApiService.getSalesStaff().then(stf => {
       if (stf && stf.length > 0) setSalesStaff(stf);
     });
+
+    // Tự động tải tin nhắn thật từ Fanpage khi vào ứng dụng
+    handleSyncFacebookLive().catch(() => {});
   }, []);
 
   // Channel & Filter State
@@ -508,7 +511,7 @@ export default function App() {
             customerClass: 'Khách Fanpage Live',
             customerSchool: 'Facebook Messenger',
             channel: 'facebook',
-            channelId: '100083303952726',
+            channelId: pageId,
             pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
             unreadCount: fc.unread_count || 0,
             isReplied: false,
@@ -533,6 +536,10 @@ export default function App() {
           return Array.from(map.values());
         });
 
+        if (mapped.length > 0) {
+          setActiveId(prev => prev || mapped[0].id);
+        }
+
         playNotificationSound();
       }
     } catch (err: any) {
@@ -551,11 +558,27 @@ export default function App() {
     setIsTestingFb(true);
     setFbConfigStatus(null);
     try {
-      const res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,picture{url}&access_token=${fbTokenInput.trim()}`);
-      const data = await res.json();
+      let activeToken = fbTokenInput.trim();
+      let res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,picture{url}&access_token=${activeToken}`);
+      let data = await res.json();
+
+      // Nếu token là User Token (tài khoản cá nhân quản trị viên), tự động trích xuất Page Token
+      const pageExtraction = await FacebookApiService.resolvePageTokenIfUserToken(activeToken);
+      if (pageExtraction) {
+        activeToken = pageExtraction.pageToken;
+        setFbTokenInput(activeToken);
+        setFbPageIdInput(pageExtraction.pageId);
+        FacebookApiService.setPageToken(activeToken);
+        FacebookApiService.setPageId(pageExtraction.pageId);
+
+        // Fetch lại thông tin của chính Fanpage
+        res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,picture{url}&access_token=${activeToken}`);
+        data = await res.json();
+      }
+
       if (!res.ok) throw new Error(data.error?.message || 'Token không hợp lệ hoặc đã hết hạn.');
 
-      const debugData = await FacebookApiService.debugToken(fbTokenInput.trim()).catch(() => null);
+      const debugData = await FacebookApiService.debugToken(activeToken).catch(() => null);
       const isNeverExpires = debugData ? debugData.expires_at === 0 : false;
       const scopes = debugData?.scopes || [];
 
