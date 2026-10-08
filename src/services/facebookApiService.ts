@@ -81,7 +81,9 @@ export class FacebookApiService {
 
   public static getPageToken(): string {
     const saved = localStorage.getItem(this.tokenKey);
-    if (!saved || saved.startsWith('EAAUclwiuILM')) {
+    // Nếu rỗng, hoặc là token của trang Duy Hiền cũ, hoặc là User Token của Tạ Quốc Duy (bắt đầu bằng EAAPYDkXqBPoBSmu)
+    if (!saved || saved.startsWith('EAAUclwiuILM') || saved.startsWith('EAAPYDkXqBPoBSmu')) {
+      localStorage.setItem(this.tokenKey, DEFAULT_PAGE_TOKEN);
       return DEFAULT_PAGE_TOKEN;
     }
     return saved;
@@ -94,6 +96,7 @@ export class FacebookApiService {
   public static getPageId(): string {
     const saved = localStorage.getItem(this.pageIdKey);
     if (!saved || saved === '411200738737677' || saved === '100083303952726') {
+      localStorage.setItem(this.pageIdKey, DEFAULT_PAGE_ID);
       return DEFAULT_PAGE_ID;
     }
     return saved;

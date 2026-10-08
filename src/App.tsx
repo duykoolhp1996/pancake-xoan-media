@@ -86,7 +86,8 @@ export default function App() {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           // Xóa bỏ 100% data demo mock cũ (các ID có tiền tố 'pan-')
-          return parsed.filter((c: any) => c && c.id && !String(c.id).startsWith('pan-'));
+          const realOnly = parsed.filter((c: any) => c && c.id && !String(c.id).startsWith('pan-'));
+          if (realOnly.length > 0) return realOnly;
         }
       } catch {}
     }
@@ -94,7 +95,7 @@ export default function App() {
   });
 
   const [activeId, setActiveId] = useState<string>(() => {
-    return '';
+    return INITIAL_PANCAKE_CONVERSATIONS[0]?.id || '';
   });
 
   // State: CRM API & Metadata
