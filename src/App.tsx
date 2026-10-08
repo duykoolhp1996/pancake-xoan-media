@@ -82,13 +82,19 @@ export default function App() {
   const [conversations, setConversations] = useState<FacebookChatConversation[]>(() => {
     const saved = localStorage.getItem('pancake_conversations');
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          // Xóa bỏ 100% data demo mock cũ (các ID có tiền tố 'pan-')
+          return parsed.filter((c: any) => c && c.id && !String(c.id).startsWith('pan-'));
+        }
+      } catch {}
     }
     return INITIAL_PANCAKE_CONVERSATIONS;
   });
 
   const [activeId, setActiveId] = useState<string>(() => {
-    return conversations[0]?.id || 'pan-1';
+    return '';
   });
 
   // State: CRM API & Metadata
@@ -110,6 +116,15 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('pancake_conversations', JSON.stringify(conversations));
   }, [conversations]);
+
+  // Auto select active conversation if list changes
+  useEffect(() => {
+    if (conversations.length === 0) {
+      if (activeId !== '') setActiveId('');
+    } else if (!activeId || !conversations.some(c => c.id === activeId)) {
+      setActiveId(conversations[0].id);
+    }
+  }, [conversations, activeId]);
 
   // Load CRM API data on startup
   useEffect(() => {
@@ -804,10 +819,31 @@ export default function App() {
 
           {/* Conversation List */}
           <div className="flex-1 overflow-y-auto divide-y divide-black/[0.04]">
-            {filteredConversations.length === 0 ? (
+            {conversations.length === 0 ? (
+              <div className="p-6 text-center text-neutral-400 space-y-3 my-auto">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl shadow-xs">
+                  💬
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-neutral-700">Chưa có hội thoại nào</p>
+                  <p className="text-[11px] text-neutral-400 mt-1 max-w-[200px] mx-auto leading-relaxed">
+                    Dữ liệu demo đã được xóa sạch. Bấm để tải tin nhắn thật từ Fanpage.
+                  </p>
+                </div>
+                <button
+                  onClick={handleSyncFacebookLive}
+                  disabled={isSyncingFb}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-xs transition-all cursor-pointer"
+                >
+                  <RefreshCw size={12} className={isSyncingFb ? 'animate-spin' : ''} />
+                  <span>{isSyncingFb ? 'Đang đồng bộ...' : 'Đồng bộ Facebook'}</span>
+                </button>
+              </div>
+            ) : filteredConversations.length === 0 ? (
               <div className="p-8 text-center text-neutral-400 space-y-2">
                 <p className="text-2xl">🥞</p>
                 <p className="text-xs font-bold">Không tìm thấy hội thoại phù hợp</p>
+                <p className="text-[11px] text-neutral-400">Thử xóa bộ lọc hoặc tìm từ khóa khác</p>
               </div>
             ) : (
               filteredConversations.map(conv => {
@@ -1152,8 +1188,31 @@ export default function App() {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-neutral-400 text-xs">
-              Chọn cuộc trò chuyện bên trái để bắt đầu
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-neutral-50/40 select-none">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 mb-4">
+                <MessengerIcon size={32} />
+              </div>
+              <h3 className="text-base font-bold text-neutral-800 mb-1">Pancake Xoăn Media</h3>
+              <p className="text-xs text-neutral-500 max-w-sm mb-5 leading-relaxed">
+                Toàn bộ dữ liệu demo mẫu đã được dọn sạch. Bạn hãy đồng bộ để tải các cuộc trò chuyện thực tế từ Fanpage Facebook hoặc cấu hình kênh.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSyncFacebookLive}
+                  disabled={isSyncingFb}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
+                >
+                  <RefreshCw size={14} className={isSyncingFb ? 'animate-spin' : ''} />
+                  <span>{isSyncingFb ? 'Đang tải tin nhắn...' : '⚡ Đồng bộ tin nhắn Fanpage'}</span>
+                </button>
+                <button
+                  onClick={() => setShowFbConfigModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-neutral-100 text-neutral-700 border border-neutral-200 rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                >
+                  <Settings size={14} />
+                  <span>Cài đặt Fanpage</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
