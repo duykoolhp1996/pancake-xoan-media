@@ -508,8 +508,8 @@ export default function App() {
             customerClass: 'Khách Fanpage Live',
             customerSchool: 'Facebook Messenger',
             channel: 'facebook',
-            channelId: 'fb-xoan-hn',
-            pageName: 'Duy Hiền Digital Marketing',
+            channelId: '100083303952726',
+            pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
             unreadCount: fc.unread_count || 0,
             isReplied: false,
             lastMessage: rawMsgs[rawMsgs.length - 1]?.message || 'Tin nhắn Messenger',
@@ -627,7 +627,7 @@ export default function App() {
 
             {/* Meta Page Indicator */}
             <span className="text-neutral-400 text-[11px] truncate hidden md:inline">
-              Page: <strong className="text-white">Duy Hiền Digital Marketing</strong>
+              Page: <strong className="text-white">Xoăn Media - Chụp Ảnh Kỷ Yếu</strong>
             </span>
 
             <button
@@ -1497,7 +1497,7 @@ export default function App() {
                     type="text"
                     value={fbPageIdInput}
                     onChange={e => setFbPageIdInput(e.target.value)}
-                    placeholder="Ví dụ: 411200738737677"
+                    placeholder="Ví dụ: 100083303952726"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-black/10 bg-neutral-50 font-mono text-xs"
                   />
                 </div>
