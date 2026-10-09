@@ -258,6 +258,12 @@ export default function App() {
   } | null>(null);
   const [fbSyncError, setFbSyncError] = useState<string | null>(null);
 
+  // Image Upload & Attachment State
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null);
+  const [previewLightboxUrl, setPreviewLightboxUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Active Conversation
   const activeConv = conversations.find(c => c.id === activeId) || conversations[0];
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -337,30 +343,66 @@ export default function App() {
   // Ref khóa chống gửi tin nhắn đúp (Debounce / Double-send guard)
   const isSendingRef = useRef<boolean>(false);
 
-  // Send message
-  const handleSendMessage = (textToSend?: string) => {
+  // Xử lý chọn ảnh từ file picker
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setSelectedImageFile(file);
+      setSelectedImagePreview(URL.createObjectURL(file));
+    }
+    if (e.target) e.target.value = '';
+  };
+
+  // Xử lý dán ảnh trực tiếp từ clipboard (Ctrl+V / Cmd+V)
+  const handlePasteInChat = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          setSelectedImageFile(file);
+          setSelectedImagePreview(URL.createObjectURL(file));
+          break;
+        }
+      }
+    }
+  };
+
+  // Send message (hỗ trợ cả text và hình ảnh)
+  const handleSendMessage = async (textToSend?: string) => {
     if (isSendingRef.current) return; // Đang gửi -> chặn click/enter đúp ngay lập tức
 
     const content = (textToSend !== undefined ? textToSend : inputText).trim();
-    if (!content || !activeConv) return;
+    const imageFile = selectedImageFile;
+    const imagePreview = selectedImagePreview;
+
+    // Phải có ít nhất nội dung text hoặc file ảnh
+    if (!content && !imageFile) return;
+    if (!activeConv) return;
 
     isSendingRef.current = true;
 
-    // Xóa input ngay tức thì để tránh gõ dính tiếp
+    // Xóa input và preview ảnh ngay tức thì
     if (textToSend === undefined) {
       setInputText('');
       setShowQuickReplyPopup(false);
     }
+    setSelectedImageFile(null);
+    setSelectedImagePreview(null);
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const displayText = content || (imageFile ? '[Hình ảnh]' : '');
 
     const newMsg: FacebookChatMessage = {
       id: `msg-${Date.now()}`,
       sender: 'sales',
       senderName: 'Sales Tư Vấn',
       text: content,
-      timestamp: timeStr
+      timestamp: timeStr,
+      attachments: imagePreview ? [{ type: 'image', url: imagePreview, name: imageFile?.name }] : undefined
     };
 
     setConversations(prev =>
@@ -368,7 +410,7 @@ export default function App() {
         c.id === activeConv.id
           ? {
               ...c,
-              lastMessage: content,
+              lastMessage: displayText,
               lastMessageTime: timeStr,
               lastMessageTimestamp: now.getTime(),
               isReplied: true,
@@ -385,19 +427,27 @@ export default function App() {
 
     // Call Facebook API if connected
     if (activeConv.facebookPsid) {
-      FacebookApiService.sendMessage(activeConv.facebookPsid, content)
-        .then(() => {
-          setTimeout(() => handleSyncFacebookLive(true), 800);
-        })
-        .catch(err => {
-          console.error('Lỗi gửi Facebook API:', err);
-        })
-        .finally(() => {
-          // Nhả khóa sau 500ms
-          setTimeout(() => {
-            isSendingRef.current = false;
-          }, 500);
-        });
+      try {
+        if (imageFile) {
+          // Gửi file ảnh qua Facebook Graph API
+          await FacebookApiService.sendImageMessage(activeConv.facebookPsid, imageFile);
+          // Nếu có nội dung text chú thích kèm theo ảnh
+          if (content) {
+            await FacebookApiService.sendMessage(activeConv.facebookPsid, content);
+          }
+        } else {
+          // Gửi tin nhắn text thông thường
+          await FacebookApiService.sendMessage(activeConv.facebookPsid, content);
+        }
+        setTimeout(() => handleSyncFacebookLive(true), 800);
+      } catch (err) {
+        console.error('Lỗi gửi Facebook API:', err);
+      } finally {
+        // Nhả khóa sau 500ms
+        setTimeout(() => {
+          isSendingRef.current = false;
+        }, 500);
+      }
     } else {
       setTimeout(() => {
         isSendingRef.current = false;
@@ -656,8 +706,12 @@ export default function App() {
                 id: rm.id,
                 sender: rm.from?.id === pageId ? 'sales' : 'customer',
                 senderName: rm.from?.name || (rm.from?.id === pageId ? 'Xoăn Media' : custName),
-                text: rm.message || '[Hình ảnh]',
-                timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+                text: rm.message || (rm.attachments?.data?.length ? '' : '[Hình ảnh]'),
+                timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+                attachments: rm.attachments?.data?.map(att => ({
+                  type: 'image' as const,
+                  url: att.image_data?.url || att.file_url || ''
+                })).filter(a => !!a.url)
               }))
             };
         });
@@ -1319,7 +1373,23 @@ export default function App() {
                               : 'bg-white text-neutral-900 border border-black/[0.06] rounded-bl-xs'
                           }`}
                         >
-                          <p className="whitespace-pre-wrap">{msg.text}</p>
+                          {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
+
+                          {/* Image Attachments */}
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className={`flex flex-wrap gap-1.5 ${msg.text ? 'mt-2' : ''}`}>
+                              {msg.attachments.map((att, attIdx) => (
+                                <img
+                                  key={attIdx}
+                                  src={att.url}
+                                  alt="Hình ảnh"
+                                  onClick={() => setPreviewLightboxUrl(att.url)}
+                                  className="max-h-60 max-w-full sm:max-w-xs rounded-xl object-cover border border-black/10 cursor-pointer hover:opacity-90 transition-all shadow-xs"
+                                  loading="lazy"
+                                />
+                              ))}
+                            </div>
+                          )}
 
                           {/* Card: Quote */}
                           {msg.cardType === 'quote' && msg.cardData && (
@@ -1405,6 +1475,16 @@ export default function App() {
                 {/* 1-Tap Action Pills */}
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
                   <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 transition-colors shrink-0 cursor-pointer"
+                    title="Chọn file ảnh từ máy tính hoặc dán ảnh (Ctrl+V) vào ô chat"
+                  >
+                    <ImageIcon className="w-3 h-3 text-purple-600" />
+                    <span>Gửi ảnh</span>
+                  </button>
+
+                  <button
                     onClick={handleSendQuoteCard}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold border border-blue-200 transition-colors shrink-0 cursor-pointer"
                   >
@@ -1432,12 +1512,60 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Image Upload Preview Bar */}
+                {selectedImagePreview && (
+                  <div className="flex items-center gap-2 p-2 bg-blue-50/90 border border-blue-200 rounded-xl animate-in fade-in">
+                    <img
+                      src={selectedImagePreview}
+                      alt="Ảnh chuẩn bị gửi"
+                      className="w-12 h-12 rounded-lg object-cover border border-blue-300 shadow-2xs shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-bold text-blue-900 truncate">
+                        {selectedImageFile?.name || 'Ảnh đính kèm'}
+                      </p>
+                      <p className="text-[10px] text-blue-600">
+                        Sẵn sàng gửi qua Facebook Messenger (Nhấn Gửi hoặc Enter)
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedImageFile(null);
+                        setSelectedImagePreview(null);
+                      }}
+                      className="p-1.5 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                      title="Gỡ ảnh này"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Input Text Form */}
                 <div className="flex items-center gap-2">
                   <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageFileChange}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 text-neutral-500 hover:text-blue-600 hover:bg-neutral-100 rounded-xl transition-colors cursor-pointer shrink-0 border border-black/10 bg-neutral-50"
+                    title="Chọn ảnh từ máy tính hoặc chụp ảnh (Có thể dán Ctrl+V)"
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                  </button>
+
+                  <input
                     type="text"
-                    placeholder="Nhập tin nhắn tư vấn... (gõ / để mở mẫu kịch bản nhanh)"
+                    placeholder="Nhập tin nhắn... (Dán ảnh Ctrl+V hoặc gõ / để mở mẫu nhanh)"
                     value={inputText}
+                    onPaste={handlePasteInChat}
                     onChange={e => {
                       setInputText(e.target.value);
                       if (e.target.value.startsWith('/')) {
@@ -1464,7 +1592,7 @@ export default function App() {
                       e.preventDefault();
                       handleSendMessage();
                     }}
-                    disabled={!inputText.trim()}
+                    disabled={!inputText.trim() && !selectedImageFile}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-xs transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
                   >
                     <Send className="w-3.5 h-3.5" />
@@ -1935,6 +2063,31 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Lightbox Preview Modal */}
+      {previewLightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in cursor-zoom-out"
+          onClick={() => setPreviewLightboxUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+            <img
+              src={previewLightboxUrl}
+              alt="Phóng to ảnh"
+              className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl select-none"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              type="button"
+              onClick={() => setPreviewLightboxUrl(null)}
+              className="absolute top-2 right-2 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white transition-colors cursor-pointer"
+              title="Đóng xem ảnh"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
         </div>
       )}

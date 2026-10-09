@@ -245,4 +245,66 @@ export class FacebookApiService {
 
     return data;
   }
+
+  /**
+   * Gửi hình ảnh từ Fanpage đến khách hàng (PSID)
+   * Hỗ trợ file nhị phân (File/Blob) hoặc URL hình ảnh
+   */
+  public static async sendImageMessage(recipientPsid: string, imageSource: File | Blob | string) {
+    const token = this.getPageToken();
+
+    if (typeof imageSource === 'string') {
+      // Gửi qua URL hình ảnh
+      const payload: Record<string, any> = {
+        recipient: { id: recipientPsid },
+        messaging_type: 'RESPONSE',
+        message: {
+          attachment: {
+            type: 'image',
+            payload: {
+              url: imageSource,
+              is_reusable: true
+            }
+          }
+        }
+      };
+
+      const res = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Lỗi gửi hình ảnh URL qua Facebook Graph API');
+      }
+      return data;
+    } else {
+      // Gửi qua FormData file nhị phân
+      const formData = new FormData();
+      formData.append('recipient', JSON.stringify({ id: recipientPsid }));
+      formData.append(
+        'message',
+        JSON.stringify({
+          attachment: {
+            type: 'image',
+            payload: {
+              is_reusable: true
+            }
+          }
+        })
+      );
+      formData.append('filedata', imageSource);
+
+      const res = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${token}`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Lỗi tải ảnh lên Facebook Graph API');
+      }
+      return data;
+    }
+  }
 }
