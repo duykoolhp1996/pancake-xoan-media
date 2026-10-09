@@ -48,16 +48,15 @@ export interface FbRawConversation {
   };
 }
 
-const DEFAULT_PAGE_TOKEN = 'EAAPYDkXqBPoBSkt4i0M0kHcjZC9aHEFGjqTz7f188CUmMFLEqiSBVWhVN8w7ggybJDI3HJQzbO7jxSqy3SwokDvuvl6nxVgtDXrEqFZCDL1WvmiU0YL9ZACLs4bEoEZCJWzjI4y12NbL0uZACLdU3njYQMQDPWOkhjXFyORZAeuXgWeUYaVZCXjDl3ZBalyA9mWgZB2LFbxyrVOfXcqUg8h0ZD';
-const DEFAULT_PAGE_ID = '111065964964204';
-const DEFAULT_APP_ID = '1081980744238330';
-const DEFAULT_APP_SECRET = 'aea735928835d4cb8ffebd651a5e83be';
+// Token Page vĩnh viễn mới nhất của Fanpage Xoăn Media - Chụp Ảnh Kỷ Yếu (ID: 111065964964204)
+export const DEFAULT_PAGE_TOKEN = 'EAAPYDkXqBPoBSnpggIUFsAOsa3lCelLpZB39R6bX0CMZCU1h9vEEjSL5btmlZAv0YE8eZCidwGGGXZBX1BpgjLLlcbNuc9MfKqWBqHPNjJQAOnUzjGOSdNfRWupq4tB7N68OnonZAxBCGRFQtoq6kLEmaFrneZCl1PIclZCulmfHutBGfWPXRzt79r1tOxMZCP4OQhkn5ZBBZCG2CScMB4zKHEZD';
+export const DEFAULT_PAGE_ID = '111065964964204';
+export const DEFAULT_APP_ID = '1081980744238330';
 
 export class FacebookApiService {
   private static tokenKey = 'crm_xoan_fb_page_token';
   private static pageIdKey = 'crm_xoan_fb_page_id';
   private static appIdKey = 'crm_xoan_fb_app_id';
-  private static appSecretKey = 'crm_xoan_fb_app_secret';
 
   public static getAppId(): string {
     return localStorage.getItem(this.appIdKey) || DEFAULT_APP_ID;
@@ -67,22 +66,9 @@ export class FacebookApiService {
     localStorage.setItem(this.appIdKey, appId.trim());
   }
 
-  public static getAppSecret(): string {
-    return localStorage.getItem(this.appSecretKey) || DEFAULT_APP_SECRET;
-  }
-
-  public static setAppSecret(appSecret: string): void {
-    localStorage.setItem(this.appSecretKey, appSecret.trim());
-  }
-
-  public static getAppToken(): string {
-    return `${this.getAppId()}|${this.getAppSecret()}`;
-  }
-
   public static getPageToken(): string {
     const saved = localStorage.getItem(this.tokenKey);
-    // Luôn ưu tiên dùng DEFAULT_PAGE_TOKEN vĩnh viễn đã được cấu hình trong hệ thống
-    if (!saved || saved !== DEFAULT_PAGE_TOKEN) {
+    if (!saved || saved.length < 30) {
       localStorage.setItem(this.tokenKey, DEFAULT_PAGE_TOKEN);
       return DEFAULT_PAGE_TOKEN;
     }
@@ -95,7 +81,7 @@ export class FacebookApiService {
 
   public static getPageId(): string {
     const saved = localStorage.getItem(this.pageIdKey);
-    if (!saved || saved === '411200738737677' || saved === '100083303952726') {
+    if (!saved || saved.length < 5) {
       localStorage.setItem(this.pageIdKey, DEFAULT_PAGE_ID);
       return DEFAULT_PAGE_ID;
     }
@@ -107,66 +93,77 @@ export class FacebookApiService {
   }
 
   /**
-   * Tự động giải nén Page Access Token VĨNH VIỄN (Never Expire) từ chuỗi User Token
+   * Tự động giải nén Page Access Token từ User Token hoặc Page Token
    */
   public static async resolvePageTokenIfUserToken(inputToken: string): Promise<{ pageToken: string; pageId: string; pageName: string } | null> {
     try {
-      let activeUserToken = inputToken.trim();
-      const appId = this.getAppId();
-      const appSecret = this.getAppSecret();
+      const token = inputToken.trim();
+      if (!token) return null;
 
-      // Thử đổi sang Long-Lived User Token qua fb_exchange_token
+      // 1. Thử gọi /me/accounts để kiểm tra xem có phải là User Token quản lý trang không
       try {
-        const exRes = await fetch(
-          `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${encodeURIComponent(activeUserToken)}`
-        );
-        const exData = await exRes.json();
-        if (exData && exData.access_token) {
-          activeUserToken = exData.access_token;
+        const res = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(token)}`);
+        const data = await res.json();
+
+        if (data && Array.isArray(data.data) && data.data.length > 0) {
+          const targetPage =
+            data.data.find((p: any) => p.id === DEFAULT_PAGE_ID || p.name?.toLowerCase().includes('xoăn')) ||
+            data.data[0];
+
+          if (targetPage && targetPage.access_token) {
+            return {
+              pageToken: targetPage.access_token,
+              pageId: targetPage.id,
+              pageName: targetPage.name
+            };
+          }
         }
       } catch {}
 
-      const res = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(activeUserToken)}`);
-      const data = await res.json();
-      if (data && Array.isArray(data.data) && data.data.length > 0) {
-        const targetPage = data.data.find((p: any) => p.id === '111065964964204' || p.name?.includes('Xoăn')) || data.data[0];
-        if (targetPage && targetPage.access_token) {
+      // 2. Nếu là trực tiếp Page Token, gọi /me để xác minh thông tin trang
+      try {
+        const pageRes = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(token)}`);
+        const pageData = await pageRes.json();
+
+        if (pageData && pageData.id && pageData.name) {
           return {
-            pageToken: targetPage.access_token,
-            pageId: targetPage.id,
-            pageName: targetPage.name
+            pageToken: token,
+            pageId: pageData.id,
+            pageName: pageData.name
           };
         }
-      }
-    } catch {}
+      } catch {}
+    } catch (err) {
+      console.warn('Lỗi phân giải token Facebook:', err);
+    }
     return null;
   }
 
   /**
-   * Kiểm tra và phân tích thông tin chi tiết của Token qua Meta Debugger
+   * Lấy thông tin Fanpage hiện tại (id, name, link, pictureUrl)
    */
-  public static async debugToken(inputToken?: string) {
+  public static async getPageInfo(inputToken?: string): Promise<{ id: string; name: string; link?: string; pictureUrl?: string }> {
     const token = inputToken || this.getPageToken();
-    const appToken = this.getAppToken();
-    const res = await fetch(`https://graph.facebook.com/v19.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(appToken)}`);
+    const res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,link&access_token=${encodeURIComponent(token)}`);
     const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error?.message || 'Không thể kiểm tra token với Meta API');
-    }
-    return data.data;
-  }
 
-  /**
-   * Lấy thông tin Fanpage hiện tại
-   */
-  public static async getPageInfo() {
-    const token = this.getPageToken();
-    const res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,picture{url}&access_token=${token}`);
-    const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error?.message || 'Không thể lấy thông tin Fanpage');
+      throw new Error(data.error?.message || 'Không thể lấy thông tin Fanpage với Token này');
     }
-    return data;
+
+    let pictureUrl: string | undefined;
+    try {
+      const picRes = await fetch(`https://graph.facebook.com/v19.0/me/picture?redirect=false&access_token=${encodeURIComponent(token)}`);
+      const picData = await picRes.json();
+      pictureUrl = picData?.data?.url;
+    } catch {}
+
+    return {
+      id: data.id,
+      name: data.name,
+      link: data.link,
+      pictureUrl
+    };
   }
 
   /**
@@ -212,7 +209,6 @@ export class FacebookApiService {
   public static async sendMessage(recipientPsid: string, text: string) {
     const token = this.getPageToken();
 
-    // Cố gắng gửi với tin nhắn thông thường
     let payload: Record<string, any> = {
       recipient: { id: recipientPsid },
       messaging_type: 'RESPONSE',
@@ -242,13 +238,11 @@ export class FacebookApiService {
 
   /**
    * Gửi hình ảnh từ Fanpage đến khách hàng (PSID)
-   * Hỗ trợ file nhị phân (File/Blob) hoặc URL hình ảnh
    */
   public static async sendImageMessage(recipientPsid: string, imageSource: File | Blob | string) {
     const token = this.getPageToken();
 
     if (typeof imageSource === 'string') {
-      // Gửi qua URL hình ảnh
       const payload: Record<string, any> = {
         recipient: { id: recipientPsid },
         messaging_type: 'RESPONSE',
@@ -274,7 +268,6 @@ export class FacebookApiService {
       }
       return data;
     } else {
-      // Gửi qua FormData file nhị phân
       const formData = new FormData();
       formData.append('recipient', JSON.stringify({ id: recipientPsid }));
       formData.append(
