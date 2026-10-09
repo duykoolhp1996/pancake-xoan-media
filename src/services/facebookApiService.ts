@@ -48,7 +48,7 @@ export interface FbRawConversation {
   };
 }
 
-const DEFAULT_PAGE_TOKEN = 'EAAPYDkXqBPoBSrNYJh7USxqWxSBlhCHqc3pojLGZAy7L9vZCqcUPEAPwiiGZBENHr3frAVxS0QO6Pt9RQK2ZBV4NltnZC4ZAiVA955ZBD3SMVvpNWcjElVqOQvdfYoSURf5ZAZAXO0brKoCV0siu4n3BZBSd9uE5KtcsqjlX7QHCcYI4mRvyy97jh6YcYM6C1vF0LZA0pp0w1F5bnuNbAUnobE0HCglylvNe3kZBNtmJbDYt6OYfTxsdytSHVQZDZD';
+const DEFAULT_PAGE_TOKEN = 'EAAPYDkXqBPoBSkt4i0M0kHcjZC9aHEFGjqTz7f188CUmMFLEqiSBVWhVN8w7ggybJDI3HJQzbO7jxSqy3SwokDvuvl6nxVgtDXrEqFZCDL1WvmiU0YL9ZACLs4bEoEZCJWzjI4y12NbL0uZACLdU3njYQMQDPWOkhjXFyORZAeuXgWeUYaVZCXjDl3ZBalyA9mWgZB2LFbxyrVOfXcqUg8h0ZD';
 const DEFAULT_PAGE_ID = '111065964964204';
 const DEFAULT_APP_ID = '1081980744238330';
 const DEFAULT_APP_SECRET = 'aea735928835d4cb8ffebd651a5e83be';
@@ -81,14 +81,8 @@ export class FacebookApiService {
 
   public static getPageToken(): string {
     const saved = localStorage.getItem(this.tokenKey);
-    // Nếu rỗng, hoặc là token của trang Duy Hiền cũ, hoặc là User Token cũ/hết hạn
-    if (
-      !saved ||
-      saved.startsWith('EAAUclwiuILM') ||
-      saved.startsWith('EAAPYDkXqBPoBSmu') ||
-      saved.startsWith('EAAPYDkXqBPoBSn5') ||
-      saved.startsWith('EAAPYDkXqBPoBShMj')
-    ) {
+    // Luôn ưu tiên dùng DEFAULT_PAGE_TOKEN vĩnh viễn đã được cấu hình trong hệ thống
+    if (!saved || saved !== DEFAULT_PAGE_TOKEN) {
       localStorage.setItem(this.tokenKey, DEFAULT_PAGE_TOKEN);
       return DEFAULT_PAGE_TOKEN;
     }
