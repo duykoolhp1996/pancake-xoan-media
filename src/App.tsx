@@ -325,17 +325,33 @@ export default function App() {
     });
   }, [conversations, selectedChannelId, searchQuery, filterTab, selectedTagFilter, staffFilter]);
 
+  // Ref khóa chống gửi tin nhắn đúp (Debounce / Double-send guard)
+  const isSendingRef = useRef<boolean>(false);
+
   // Send message
   const handleSendMessage = (textToSend?: string) => {
+    if (isSendingRef.current) return; // Đang gửi -> chặn click/enter đúp ngay lập tức
+
     const content = (textToSend !== undefined ? textToSend : inputText).trim();
     if (!content || !activeConv) return;
+
+    isSendingRef.current = true;
+
+    // Xóa input ngay tức thì để tránh gõ dính tiếp
+    if (textToSend === undefined) {
+      setInputText('');
+      setShowQuickReplyPopup(false);
+    }
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
     const newMsg: FacebookChatMessage = {
       id: `msg-${Date.now()}`,
       sender: 'sales',
       senderName: 'Sales Tư Vấn',
       text: content,
-      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+      timestamp: timeStr
     };
 
     setConversations(prev =>
@@ -344,7 +360,8 @@ export default function App() {
           ? {
               ...c,
               lastMessage: content,
-              lastMessageTime: newMsg.timestamp,
+              lastMessageTime: timeStr,
+              lastMessageTimestamp: now.getTime(),
               isReplied: true,
               messages: [...c.messages, newMsg]
             }
@@ -358,12 +375,19 @@ export default function App() {
         .then(() => {
           setTimeout(() => handleSyncFacebookLive(true), 800);
         })
-        .catch(() => {});
-    }
-
-    if (textToSend === undefined) {
-      setInputText('');
-      setShowQuickReplyPopup(false);
+        .catch(err => {
+          console.error('Lỗi gửi Facebook API:', err);
+        })
+        .finally(() => {
+          // Nhả khóa sau 500ms
+          setTimeout(() => {
+            isSendingRef.current = false;
+          }, 500);
+        });
+    } else {
+      setTimeout(() => {
+        isSendingRef.current = false;
+      }, 500);
     }
   };
 
@@ -581,35 +605,47 @@ export default function App() {
             lastMessageIdMapRef.current.set(`fb-${fc.id}`, lastRawMsg.id);
           }
 
-          return {
-            id: `fb-${fc.id}`,
-            facebookPsid: psid,
-            isLiveFacebook: true,
-            customerName: custName,
-            customerAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(custName)}&background=0084FF&color=fff&bold=true`,
-            customerClass: 'Khách Fanpage Live',
-            customerSchool: 'Facebook Messenger',
-            channel: 'facebook',
-            channelId: pageId,
-            pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
-            unreadCount: fc.unread_count || 0,
-            isReplied: false,
-            lastMessage: lastRawMsg?.message || (lastRawMsg?.attachments ? '[Hình ảnh / Tệp]' : 'Tin nhắn Messenger'),
-            lastMessageTime: lastRawMsg?.created_time
-              ? new Date(lastRawMsg.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-              : 'Mới đây',
-            lastMessageTimestamp: msgTimestamp,
-            assignedSalesName: 'Duy Kool (Admin)',
-            pipelineStage: 'Đang tư vấn',
-            tags: ['Facebook Fanpage', 'Live Chat'],
-            messages: rawMsgs.map(rm => ({
-              id: rm.id,
-              sender: rm.from?.id === pageId ? 'sales' : 'customer',
-              senderName: rm.from?.name || (rm.from?.id === pageId ? 'Xoăn Media' : custName),
-              text: rm.message || '[Hình ảnh]',
-              timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-            }))
-          };
+            // Khử trùng lặp tin nhắn nếu bị gửi đúp cùng lúc từ Facebook API
+            const dedupRawMsgs = rawMsgs.filter((rm, idx, arr) => {
+              if (idx === 0) return true;
+              const prev = arr[idx - 1];
+              if (rm.id && prev.id && rm.id === prev.id) return false;
+              const isSameSender = rm.from?.id === prev.from?.id;
+              const isSameText = (rm.message || '').trim() === (prev.message || '').trim() && (rm.message || '').trim() !== '';
+              const isCloseTime = Math.abs(new Date(rm.created_time).getTime() - new Date(prev.created_time).getTime()) < 5000;
+              if (isSameSender && isSameText && isCloseTime) return false;
+              return true;
+            });
+
+            return {
+              id: `fb-${fc.id}`,
+              facebookPsid: psid,
+              isLiveFacebook: true,
+              customerName: custName,
+              customerAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(custName)}&background=0084FF&color=fff&bold=true`,
+              customerClass: 'Khách Fanpage Live',
+              customerSchool: 'Facebook Messenger',
+              channel: 'facebook',
+              channelId: pageId,
+              pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
+              unreadCount: fc.unread_count || 0,
+              isReplied: false,
+              lastMessage: lastRawMsg?.message || (lastRawMsg?.attachments ? '[Hình ảnh / Tệp]' : 'Tin nhắn Messenger'),
+              lastMessageTime: lastRawMsg?.created_time
+                ? new Date(lastRawMsg.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+                : 'Mới đây',
+              lastMessageTimestamp: msgTimestamp,
+              assignedSalesName: 'Duy Kool (Admin)',
+              pipelineStage: 'Đang tư vấn',
+              tags: ['Facebook Fanpage', 'Live Chat'],
+              messages: dedupRawMsgs.map(rm => ({
+                id: rm.id,
+                sender: rm.from?.id === pageId ? 'sales' : 'customer',
+                senderName: rm.from?.name || (rm.from?.id === pageId ? 'Xoăn Media' : custName),
+                text: rm.message || '[Hình ảnh]',
+                timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+              }))
+            };
         });
 
         if (isFirstSyncRef.current) {
@@ -1217,7 +1253,18 @@ export default function App() {
 
               {/* Chat Message Stream */}
               <div className="flex-1 p-4 overflow-y-auto space-y-3">
-                {activeConv.messages.map((msg, index) => {
+                {activeConv.messages
+                  .filter((msg, idx, arr) => {
+                    if (idx === 0) return true;
+                    const prev = arr[idx - 1];
+                    if (msg.id && prev.id && msg.id === prev.id) return false;
+                    const isSameSender = msg.sender === prev.sender;
+                    const isSameText = (msg.text || '').trim() === (prev.text || '').trim() && (msg.text || '').trim() !== '';
+                    const isSameMinute = msg.timestamp === prev.timestamp;
+                    if (isSameSender && isSameText && isSameMinute) return false;
+                    return true;
+                  })
+                  .map((msg, index) => {
                   const isSales = msg.sender === 'sales';
 
                   return (
@@ -1370,12 +1417,22 @@ export default function App() {
                       }
                     }}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') handleSendMessage();
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        // Chống kích hoạt đúp khi bộ gõ tiếng Việt Telex/VNI đang kết thúc từ
+                        if (e.nativeEvent.isComposing) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleSendMessage();
+                      }
                     }}
                     className="flex-1 px-3.5 py-2 text-xs bg-neutral-50 border border-black/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-neutral-400"
                   />
                   <button
-                    onClick={() => handleSendMessage()}
+                    type="button"
+                    onClick={e => {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }}
                     disabled={!inputText.trim()}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-xs transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
                   >
