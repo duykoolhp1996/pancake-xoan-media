@@ -665,10 +665,26 @@ export default function App() {
     }
   };
 
-  const handleSaveFbConfig = () => {
-    FacebookApiService.setPageToken(fbTokenInput);
-    FacebookApiService.setPageId(fbPageIdInput);
+  const handleSaveFbConfig = async () => {
+    let token = fbTokenInput.trim();
+    let pageId = fbPageIdInput.trim() || FacebookApiService.getPageId();
+
+    // Tự động phân giải User Token sang Page Token nếu người dùng dán User Token
+    const pageExtraction = await FacebookApiService.resolvePageTokenIfUserToken(token);
+    if (pageExtraction) {
+      token = pageExtraction.pageToken;
+      pageId = pageExtraction.pageId;
+      setFbTokenInput(token);
+      setFbPageIdInput(pageId);
+    }
+
+    FacebookApiService.setPageToken(token);
+    FacebookApiService.setPageId(pageId);
     setFbConfigStatus('🎉 Đã lưu cài đặt Fanpage thành công!');
+    
+    // Tự động đồng bộ ngay
+    handleSyncFacebookLive().catch(() => {});
+
     setTimeout(() => {
       setShowFbConfigModal(false);
       setFbConfigStatus(null);

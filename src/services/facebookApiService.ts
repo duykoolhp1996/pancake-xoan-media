@@ -48,9 +48,9 @@ export interface FbRawConversation {
   };
 }
 
-const DEFAULT_PAGE_TOKEN = 'EAAPYDkXqBPoBSn5CYIfZAkhaB3wnzKRyrfr4p2vfW3PdQF2SgceOtFuwfc6GT2aQE9r8dnZBZADYVE9nR1qFZCVYWXRMTwLZAX5MZBSrJISquZCZBA30jULSUMUMeDzeCRbCKex2E1a42AXrdrHNn3RHzaDRbuVSdgXHHRvwtGo0giN0Ts1JmDIULryzeNtZB0ysWK60aNGSjOaI9XHfC06ZAuuJ4QIgPc3w2r0XZC3QPSTkwBf2fqK2sgDetkZD';
+const DEFAULT_PAGE_TOKEN = 'EAAPYDkXqBPoBSrNYJh7USxqWxSBlhCHqc3pojLGZAy7L9vZCqcUPEAPwiiGZBENHr3frAVxS0QO6Pt9RQK2ZBV4NltnZC4ZAiVA955ZBD3SMVvpNWcjElVqOQvdfYoSURf5ZAZAXO0brKoCV0siu4n3BZBSd9uE5KtcsqjlX7QHCcYI4mRvyy97jh6YcYM6C1vF0LZA0pp0w1F5bnuNbAUnobE0HCglylvNe3kZBNtmJbDYt6OYfTxsdytSHVQZDZD';
 const DEFAULT_PAGE_ID = '111065964964204';
-const DEFAULT_APP_ID = '1438809894822067';
+const DEFAULT_APP_ID = '1081980744238330';
 const DEFAULT_APP_SECRET = 'aea735928835d4cb8ffebd651a5e83be';
 
 export class FacebookApiService {
@@ -81,8 +81,14 @@ export class FacebookApiService {
 
   public static getPageToken(): string {
     const saved = localStorage.getItem(this.tokenKey);
-    // Nếu rỗng, hoặc là token của trang Duy Hiền cũ, hoặc là User Token của Tạ Quốc Duy (bắt đầu bằng EAAPYDkXqBPoBSmu)
-    if (!saved || saved.startsWith('EAAUclwiuILM') || saved.startsWith('EAAPYDkXqBPoBSmu')) {
+    // Nếu rỗng, hoặc là token của trang Duy Hiền cũ, hoặc là User Token cũ/hết hạn
+    if (
+      !saved ||
+      saved.startsWith('EAAUclwiuILM') ||
+      saved.startsWith('EAAPYDkXqBPoBSmu') ||
+      saved.startsWith('EAAPYDkXqBPoBSn5') ||
+      saved.startsWith('EAAPYDkXqBPoBShMj')
+    ) {
       localStorage.setItem(this.tokenKey, DEFAULT_PAGE_TOKEN);
       return DEFAULT_PAGE_TOKEN;
     }
