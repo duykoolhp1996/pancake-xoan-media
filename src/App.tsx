@@ -184,13 +184,22 @@ export default function App() {
     handleSyncFacebookLive(false).catch(() => {});
   }, []);
 
-  // Realtime Live Polling: Tự động quét và nhảy tin nhắn mới mỗi 3.5 giây
+  // Realtime Live Polling: Tự động quét và nhảy tin nhắn mới mỗi 2.5 giây
   useEffect(() => {
     const pollTimer = setInterval(() => {
       handleSyncFacebookLive(true).catch(() => {});
-    }, 3500);
+    }, 2500);
 
-    return () => clearInterval(pollTimer);
+    const handleFocus = () => {
+      // Khi người dùng bấm chuột quay lại tab Pancake, quét ngay tức thì
+      handleSyncFacebookLive(true).catch(() => {});
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(pollTimer);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   // Channel & Filter State
@@ -368,6 +377,11 @@ export default function App() {
           : c
       )
     );
+
+    // Cuộn tức thì 0s xuống cuối danh sách tin nhắn
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 20);
 
     // Call Facebook API if connected
     if (activeConv.facebookPsid) {
@@ -659,10 +673,27 @@ export default function App() {
             const oldC = prevMap.get(newC.id);
             if (!oldC) return newC;
 
+            // Bảo toàn các tin nhắn local đang chờ (optimistic messages có id bắt đầu bằng 'msg-')
+            // mà Facebook chưa kịp trả về trong đợt sync này
+            const pendingLocalMsgs = oldC.messages.filter(om => 
+              om.id.startsWith('msg-') && 
+              !newC.messages.some(nm => 
+                nm.sender === om.sender && 
+                nm.text.trim() === om.text.trim()
+              )
+            );
+
+            // Gộp tin nhắn từ Facebook và tin nhắn local đang chờ để không bị mất hay giật 2s
+            const mergedMessages = [...newC.messages, ...pendingLocalMsgs];
+            const lastMsg = mergedMessages[mergedMessages.length - 1];
+
             // Giữ lại các metadata tùy chỉnh do sales gắn trên CRM (tag, pipeline, notes, phone...)
             return {
               ...oldC,
               ...newC,
+              messages: mergedMessages,
+              lastMessage: lastMsg?.text || newC.lastMessage,
+              lastMessageTime: lastMsg?.timestamp || newC.lastMessageTime,
               customerPhone: oldC.customerPhone || newC.customerPhone,
               customerClass: oldC.customerClass || newC.customerClass,
               customerSchool: oldC.customerSchool || newC.customerSchool,
@@ -863,11 +894,11 @@ export default function App() {
           {/* Live Auto-Polling Status Badge */}
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-extrabold select-none shadow-2xs"
-            title="Đang tự động quét và nhảy tin nhắn mới từ Fanpage mỗi 3.5 giây"
+            title="Đang tự động quét và nhảy tin nhắn mới từ Fanpage mỗi 2.5 giây"
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="hidden sm:inline">Tự Động Nhảy Tin (3.5s)</span>
-            <span className="sm:hidden">Live 3s</span>
+            <span className="hidden sm:inline">Tự Động Nhảy Tin (2.5s)</span>
+            <span className="sm:hidden">Live 2s</span>
           </div>
 
           {/* Deep link button to CRM Xoan */}
