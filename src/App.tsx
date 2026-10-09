@@ -19,6 +19,7 @@ import {
   PipelineStage
 } from './types';
 import { MessengerIcon } from './components/common/MessengerIcon';
+import { AiChatService, AiConversationAnalysis } from './services/aiChatService';
 import {
   Search,
   Send,
@@ -55,7 +56,8 @@ import {
   UserCheck,
   Camera,
   Building2,
-  Video
+  Video,
+  Bot
 } from 'lucide-react';
 
 const STAGE_COLORS: Partial<Record<string, { bg: string; text: string; border: string }>> = {
@@ -121,7 +123,8 @@ export default function App() {
   const [salesStaff, setSalesStaff] = useState<SalesStaff[]>([
     { id: 'user-admin', name: 'Duy Kool (Admin)' },
     { id: 'sales-lananh', name: 'Lan Anh (Sales)' },
-    { id: 'sales-hoanganh', name: 'Hoàng Anh (Sales)' }
+    { id: 'sales-hoanganh', name: 'Hoàng Anh (Sales)' },
+    { id: 'sales-ai', name: '🤖 Bot AI Tư Vấn (Auto)' }
   ]);
 
   // Save conversations to localStorage
@@ -215,7 +218,9 @@ export default function App() {
 
   // Right POS Panel
   const [showRightPanel, setShowRightPanel] = useState(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'customer' | 'pos' | 'templates' | 'tags'>('customer');
+  const [rightPanelTab, setRightPanelTab] = useState<'customer' | 'ai' | 'pos' | 'templates' | 'tags'>('customer');
+  const [isAiReplying, setIsAiReplying] = useState(false);
+  const [aiInsightSuccess, setAiInsightSuccess] = useState<string | null>(null);
 
   // Quick Reply dropdown / Slash shortcut popup
   const [inputText, setInputText] = useState('');
@@ -287,6 +292,73 @@ export default function App() {
       setNoteText(activeConv.notes || '');
     }
   }, [activeConv?.id]);
+
+  // AI Realtime Conversation Analysis
+  const aiAnalysis = useMemo<AiConversationAnalysis>(() => {
+    if (!activeConv) {
+      return {
+        customerIntent: 'Đang chờ hội thoại...',
+        customerPersonality: 'Bình thường',
+        interestLevel: 'Mới tìm hiểu (Cold)',
+        suggestedReplies: []
+      };
+    }
+    return AiChatService.analyze(activeConv.customerName, activeConv.messages);
+  }, [activeConv?.id, activeConv?.messages, activeConv?.customerName]);
+
+  const handleApplyAiInsights = () => {
+    if (!activeConv) return;
+    if (aiAnalysis.detectedSchool) setEditCustSchool(aiAnalysis.detectedSchool);
+    if (aiAnalysis.detectedClass) setEditCustClass(aiAnalysis.detectedClass);
+    if (aiAnalysis.detectedPhone) setEditCustPhone(aiAnalysis.detectedPhone);
+    const newNote = noteText ? `${noteText}\n[AI Phân Tích]: ${aiAnalysis.customerPersonality}` : `[AI Phân Tích]: ${aiAnalysis.customerPersonality}`;
+    setNoteText(newNote);
+    setAiInsightSuccess('🎉 Đã đồng bộ thông tin AI phân tích vào Hồ sơ!');
+    setTimeout(() => setAiInsightSuccess(null), 3000);
+  };
+
+  const handleAssignStaff = (convId: string, staffName: string) => {
+    setConversations(prev =>
+      prev.map(c => (c.id === convId ? { ...c, assignedSalesName: staffName } : c))
+    );
+  };
+
+  const handleAiSendReply = async (replyText: string) => {
+    if (!activeConv || !replyText.trim() || isAiReplying) return;
+    setIsAiReplying(true);
+    const recipientPsid = activeConv.facebookPsid || (activeConv.id.startsWith('t_') ? activeConv.id.replace('t_', '') : activeConv.id);
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const newMsg: FacebookChatMessage = {
+      id: `msg-ai-${Date.now()}`,
+      sender: 'sales',
+      senderName: activeConv.assignedSalesName || '🤖 Bot AI Tư Vấn (Auto)',
+      text: replyText.trim(),
+      timestamp: nowTime
+    };
+
+    setConversations(prev =>
+      prev.map(c =>
+        c.id === activeConv.id
+          ? {
+              ...c,
+              lastMessage: replyText.trim(),
+              lastMessageTime: 'Vừa xong',
+              messages: [...c.messages, newMsg]
+            }
+          : c
+      )
+    );
+
+    try {
+      if (recipientPsid) {
+        await FacebookApiService.sendMessage(recipientPsid, replyText.trim());
+      }
+    } catch (err: any) {
+      console.warn('Lỗi AI gửi tin nhắn:', err);
+    } finally {
+      setIsAiReplying(false);
+    }
+  };
 
   // Audio Ting Ting
   const playNotificationSound = () => {
@@ -1237,6 +1309,13 @@ export default function App() {
                             </span>
                           )}
 
+                          {conv.assignedSalesName && conv.assignedSalesName.includes('AI') && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-0.5 animate-pulse">
+                              <Bot className="w-2.5 h-2.5 text-purple-600" />
+                              <span>AI Auto</span>
+                            </span>
+                          )}
+
                           {conv.tags.slice(0, 2).map((t, idx) => (
                             <span key={idx} className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">
                               {t}
@@ -1301,9 +1380,59 @@ export default function App() {
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                      Kênh: <span className="font-semibold text-slate-700">{activeConv.pageName || 'Fanpage Xoăn Media'}</span> • Phụ trách: <span className="font-semibold text-blue-700">{activeConv.assignedSalesName}</span>
-                    </p>
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 truncate mt-0.5">
+                      <span>Kênh: <strong className="text-slate-700">{activeConv.pageName || 'Fanpage Xoăn Media'}</strong></span>
+                      <span>•</span>
+                      <span>Phụ trách:</span>
+                      <div className="relative inline-block">
+                        <button
+                          type="button"
+                          onClick={() => setShowAssignStaffMenu(!showAssignStaffMenu)}
+                          className={`font-semibold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
+                            activeConv.assignedSalesName.includes('AI')
+                              ? 'bg-purple-100 text-purple-800 border border-purple-300 animate-pulse'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                          }`}
+                          title="Bấm để phân công nhân sự hoặc giao cho AI tự động chat"
+                        >
+                          {activeConv.assignedSalesName.includes('AI') && <Bot className="w-3 h-3 text-purple-600" />}
+                          <span>{activeConv.assignedSalesName}</span>
+                          <ChevronDown className="w-3 h-3 opacity-60" />
+                        </button>
+
+                        {/* Dropdown menu chọn nhân sự / AI */}
+                        {showAssignStaffMenu && (
+                          <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in">
+                            <p className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              Phân công hội thoại
+                            </p>
+                            {salesStaff.map(s => {
+                              const isCurrent = activeConv.assignedSalesName === s.name;
+                              const isAi = s.name.includes('AI');
+                              return (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => {
+                                    handleAssignStaff(activeConv.id, s.name);
+                                    setShowAssignStaffMenu(false);
+                                  }}
+                                  className={`w-full px-3 py-1.5 text-left text-xs font-semibold flex items-center justify-between transition-colors ${
+                                    isCurrent ? 'bg-blue-50 text-blue-700' : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <span className={`flex items-center gap-1.5 ${isAi ? 'text-purple-700 font-bold' : ''}`}>
+                                    {isAi ? <Bot className="w-3.5 h-3.5 text-purple-600" /> : <User className="w-3.5 h-3.5 text-slate-400" />}
+                                    {s.name}
+                                  </span>
+                                  {isCurrent && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1499,6 +1628,19 @@ export default function App() {
                     <Sparkles className="w-3.5 h-3.5 text-amber-600" />
                     <span>Kịch bản (/)</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRightPanel(true);
+                      setRightPanelTab('ai');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-500/15 to-indigo-500/15 hover:from-purple-500/25 hover:to-indigo-500/25 text-purple-700 font-bold border border-purple-200 transition-all shrink-0 cursor-pointer active:scale-95 shadow-2xs"
+                    title="Mở bảng phân tích và gợi ý câu trả lời của Trợ Lý AI"
+                  >
+                    <Bot className="w-3.5 h-3.5 text-purple-600 animate-pulse" />
+                    <span>Trợ Lý AI</span>
+                  </button>
                 </div>
 
                 {/* Image Upload Preview Bar */}
@@ -1648,25 +1790,36 @@ export default function App() {
               <div className="p-1 bg-slate-200/60 rounded-xl flex gap-1 text-[11px] font-bold">
                 <button
                   onClick={() => setRightPanelTab('customer')}
-                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 ${
                     rightPanelTab === 'customer'
                       ? 'bg-white text-slate-900 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   <User className="w-3.5 h-3.5" />
-                  <span>Hồ Sơ Khách</span>
+                  <span>Hồ Sơ</span>
+                </button>
+                <button
+                  onClick={() => setRightPanelTab('ai')}
+                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 ${
+                    rightPanelTab === 'ai'
+                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs font-bold'
+                      : 'text-purple-700 hover:text-purple-900 hover:bg-purple-50/50'
+                  }`}
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>Trợ Lý AI</span>
                 </button>
                 <button
                   onClick={() => setRightPanelTab('pos')}
-                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 ${
                     rightPanelTab === 'pos'
                       ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   <ShoppingBag className="w-3.5 h-3.5" />
-                  <span>Pancake POS</span>
+                  <span>POS</span>
                 </button>
               </div>
             </div>
@@ -1677,6 +1830,175 @@ export default function App() {
                 <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-bold flex items-center gap-2 animate-in fade-in">
                   <Check className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>{posSuccessMsg}</span>
+                </div>
+              )}
+
+              {/* TAB AI: TRỢ LÝ AI TỰ ĐỘNG CHAT & CO-PILOT */}
+              {rightPanelTab === 'ai' && (
+                <div className="space-y-4 animate-in fade-in">
+                  {/* Status & Auto-pilot Switch */}
+                  <div className={`p-3.5 rounded-2xl border transition-all ${
+                    activeConv.assignedSalesName.includes('AI')
+                      ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200 shadow-2xs'
+                      : 'bg-slate-50 border-slate-200'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-xs ${
+                          activeConv.assignedSalesName.includes('AI')
+                            ? 'bg-gradient-to-tr from-purple-600 to-indigo-600 animate-pulse'
+                            : 'bg-slate-400'
+                        }`}>
+                          <Bot className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-900 text-xs">Ủy Quyền Cho AI Chat</p>
+                          <p className="text-[10px] text-slate-500">
+                            {activeConv.assignedSalesName.includes('AI')
+                              ? '🤖 Đang bật: AI tự động tư vấn 24/7'
+                              : 'Chế độ thủ công (Nhân viên tư vấn)'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Toggle button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextStaff = activeConv.assignedSalesName.includes('AI')
+                            ? 'Duy Kool (Admin)'
+                            : '🤖 Bot AI Tư Vấn (Auto)';
+                          handleAssignStaff(activeConv.id, nextStaff);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs active:scale-95 ${
+                          activeConv.assignedSalesName.includes('AI')
+                            ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                            : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}
+                      >
+                        {activeConv.assignedSalesName.includes('AI') ? 'Đang Bật' : 'Bật AI'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* AI Customer Insights */}
+                  <div className="p-3.5 bg-white border border-slate-200 rounded-2xl space-y-2.5 shadow-2xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                        <span className="font-bold text-xs text-slate-900">Thấu Hiểu Khách Hàng (Insight)</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                        aiAnalysis.interestLevel.includes('Hot')
+                          ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                          : aiAnalysis.interestLevel.includes('Warm')
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        {aiAnalysis.interestLevel}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 text-[11px]">
+                      <div>
+                        <span className="text-slate-500 font-medium">Ý định khách: </span>
+                        <span className="font-semibold text-slate-800">{aiAnalysis.customerIntent}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 font-medium">Tâm lý / Gu: </span>
+                        <span className="text-slate-700">{aiAnalysis.customerPersonality}</span>
+                      </div>
+                      {(aiAnalysis.detectedSchool || aiAnalysis.detectedClass || aiAnalysis.detectedPhone) && (
+                        <div className="pt-1.5 flex flex-wrap gap-1.5">
+                          {aiAnalysis.detectedSchool && (
+                            <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-800 font-bold border border-blue-200 text-[10px]">
+                              🏫 {aiAnalysis.detectedSchool}
+                            </span>
+                          )}
+                          {aiAnalysis.detectedClass && (
+                            <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-800 font-bold border border-indigo-200 text-[10px]">
+                              🏷️ Lớp {aiAnalysis.detectedClass}
+                            </span>
+                          )}
+                          {aiAnalysis.detectedPhone && (
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 font-mono font-bold border border-emerald-200 text-[10px]">
+                              📞 {aiAnalysis.detectedPhone}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {aiInsightSuccess && (
+                      <p className="text-[10px] text-emerald-700 font-bold animate-in fade-in">
+                        {aiInsightSuccess}
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleApplyAiInsights}
+                      className="w-full py-2 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-800 font-bold rounded-xl transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200"
+                    >
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Đồng Bộ Sang Hồ Sơ CRM (1-Click)</span>
+                    </button>
+                  </div>
+
+                  {/* Smart Reply Suggestions */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="font-bold text-xs text-slate-900">Gợi Ý Trả Lời Chuẩn Xoăn Media</span>
+                      <span className="text-[10px] text-slate-400">Chọn để gửi nhanh</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {aiAnalysis.suggestedReplies.map((reply, rIdx) => (
+                        <div
+                          key={rIdx}
+                          className="p-3 bg-white hover:bg-purple-50/30 border border-slate-200 hover:border-purple-300 rounded-2xl transition-all shadow-2xs space-y-2 group"
+                        >
+                          <p className="text-[11px] text-slate-800 leading-relaxed">
+                            {reply}
+                          </p>
+                          <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInputText(reply);
+                              }}
+                              className="px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            >
+                              Chèn vào ô chat
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAiSendReply(reply)}
+                              className="px-3 py-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all shadow-2xs active:scale-95 flex items-center gap-1 cursor-pointer"
+                            >
+                              <Send className="w-2.5 h-2.5" />
+                              <span>Gửi ngay</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Trigger Auto Reply Button */}
+                  <button
+                    type="button"
+                    disabled={isAiReplying}
+                    onClick={() => {
+                      if (aiAnalysis.suggestedReplies[0]) {
+                        handleAiSendReply(aiAnalysis.suggestedReplies[0]);
+                      }
+                    }}
+                    className="w-full py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:opacity-95 text-white rounded-xl font-bold text-xs shadow-md shadow-purple-500/20 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isAiReplying ? 'Đang gửi...' : '🚀 Cho AI Phản Hồi Ngay Tin Nhắn Này'}</span>
+                  </button>
                 </div>
               )}
 
