@@ -85,8 +85,18 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // Xóa bỏ 100% data demo mock cũ (các ID có tiền tố 'pan-')
-          const realOnly = parsed.filter((c: any) => c && c.id && !String(c.id).startsWith('pan-'));
+          // Xóa bỏ 100% data demo cũ VÀ dữ liệu kênh Duy Hiền Digital Marketing cũ
+          const realOnly = parsed.filter(
+            (c: any) =>
+              c &&
+              c.id &&
+              !String(c.id).startsWith('pan-') &&
+              !c.pageName?.includes('Duy Hiền') &&
+              c.customerName !== 'Meta Business Agent' &&
+              c.channelId !== 'fb-xoan-hn' &&
+              c.channelId !== '411200738737677' &&
+              (c.channelId === '111065964964204' || c.pageName?.includes('Xoăn Media'))
+          );
           if (realOnly.length > 0) return realOnly;
         }
       } catch {}
@@ -131,6 +141,30 @@ export default function App() {
       setActiveId(conversations[0].id);
     }
   }, [conversations, activeId]);
+
+  // Xóa bỏ triệt để dữ liệu cũ của kênh Duy Hiền Digital Marketing khỏi state & localStorage
+  useEffect(() => {
+    const hasOldDuyHien = conversations.some(
+      c =>
+        c.pageName?.includes('Duy Hiền') ||
+        c.customerName === 'Meta Business Agent' ||
+        c.channelId === 'fb-xoan-hn' ||
+        c.channelId === '411200738737677' ||
+        (c.channelId !== '111065964964204' && !c.pageName?.includes('Xoăn Media'))
+    );
+    if (hasOldDuyHien || conversations.length === 0) {
+      setConversations(INITIAL_PANCAKE_CONVERSATIONS);
+      setActiveId(INITIAL_PANCAKE_CONVERSATIONS[0]?.id || '');
+      localStorage.setItem('pancake_conversations', JSON.stringify(INITIAL_PANCAKE_CONVERSATIONS));
+    }
+  }, []);
+
+  const handleForceResetToXoanMedia = () => {
+    setConversations(INITIAL_PANCAKE_CONVERSATIONS);
+    setActiveId(INITIAL_PANCAKE_CONVERSATIONS[0]?.id || '');
+    localStorage.setItem('pancake_conversations', JSON.stringify(INITIAL_PANCAKE_CONVERSATIONS));
+    setFbSyncError(null);
+  };
 
   // Load CRM API data on startup
   useEffect(() => {
@@ -567,7 +601,15 @@ export default function App() {
       } else {
         setFbSyncError(`Lỗi đồng bộ: ${err.message || 'Không thể tải tin nhắn Facebook'}`);
       }
-      setConversations(prev => (prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev));
+      setConversations(prev => {
+        const hasInvalid = prev.some(
+          c =>
+            c.pageName?.includes('Duy Hiền') ||
+            c.customerName === 'Meta Business Agent' ||
+            (c.channelId !== '111065964964204' && !c.pageName?.includes('Xoăn Media'))
+        );
+        return hasInvalid || prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev;
+      });
     } finally {
       setIsSyncingFb(false);
     }
@@ -723,6 +765,14 @@ export default function App() {
             <span className="truncate">{fbSyncError}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
+            <button
+              onClick={handleForceResetToXoanMedia}
+              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-black transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+              title="Khôi phục ngay danh sách 25 hội thoại kỷ yếu của Fanpage Xoăn Media"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Nạp Hội Thoại Xoăn Media</span>
+            </button>
             <button
               onClick={() => setShowFbConfigModal(true)}
               className="px-2.5 py-1 bg-neutral-900 text-white hover:bg-neutral-800 rounded-lg text-[11px] font-black transition-colors cursor-pointer"
