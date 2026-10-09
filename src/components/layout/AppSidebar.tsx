@@ -40,13 +40,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       icon: MessageSquare,
       badge: totalUnreadCount > 0 ? totalUnreadCount : null,
       badgeColor: 'bg-rose-500 text-white'
-    },
-    {
-      id: 'orders' as AppView,
-      label: 'Đơn Hàng & POS',
-      icon: ShoppingBag,
-      badge: totalOrdersCount > 0 ? totalOrdersCount : null,
-      badgeColor: 'bg-slate-200 text-slate-700'
     }
   ];
 
