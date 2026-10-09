@@ -63,6 +63,7 @@ export interface FacebookChatConversation {
   isReplied?: boolean;
   lastMessage: string;
   lastMessageTime: string;
+  lastMessageTimestamp?: number;
   assignedSalesName: string;
   assignedSalesId?: string;
   pipelineStage?: string;

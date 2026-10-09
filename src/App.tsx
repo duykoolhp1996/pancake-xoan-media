@@ -181,7 +181,16 @@ export default function App() {
     });
 
     // Tự động tải tin nhắn thật từ Fanpage khi vào ứng dụng
-    handleSyncFacebookLive().catch(() => {});
+    handleSyncFacebookLive(false).catch(() => {});
+  }, []);
+
+  // Realtime Live Polling: Tự động quét và nhảy tin nhắn mới mỗi 3.5 giây
+  useEffect(() => {
+    const pollTimer = setInterval(() => {
+      handleSyncFacebookLive(true).catch(() => {});
+    }, 3500);
+
+    return () => clearInterval(pollTimer);
   }, []);
 
   // Channel & Filter State
@@ -345,7 +354,11 @@ export default function App() {
 
     // Call Facebook API if connected
     if (activeConv.facebookPsid) {
-      FacebookApiService.sendMessage(activeConv.facebookPsid, content).catch(() => {});
+      FacebookApiService.sendMessage(activeConv.facebookPsid, content)
+        .then(() => {
+          setTimeout(() => handleSyncFacebookLive(true), 800);
+        })
+        .catch(() => {});
     }
 
     if (textToSend === undefined) {
@@ -532,19 +545,41 @@ export default function App() {
     setTimeout(() => setPosSuccessMsg(null), 4000);
   };
 
-  // Sync Facebook Live Conversations
-  const handleSyncFacebookLive = async () => {
-    setIsSyncingFb(true);
+  // Refs theo dõi tin nhắn cuối cùng để phát hiện tin nhắn mới Realtime
+  const lastMessageIdMapRef = useRef<Map<string, string>>(new Map());
+  const isFirstSyncRef = useRef<boolean>(true);
+
+  // Sync Facebook Live Conversations (hỗ trợ silent mode cho auto-polling nền)
+  const handleSyncFacebookLive = async (silent: boolean = false) => {
+    if (!silent) setIsSyncingFb(true);
     try {
       const fbConvs = await FacebookApiService.getConversations();
       const pageId = FacebookApiService.getPageId();
 
       if (fbConvs && fbConvs.length > 0) {
+        let hasNewIncomingFromCustomer = false;
+
         const mapped: FacebookChatConversation[] = fbConvs.map(fc => {
           const custPart = fc.participants?.data?.find(p => p.id !== pageId) || fc.participants?.data?.[0];
           const psid = custPart?.id || '';
           const custName = custPart?.name || 'Khách Hàng Facebook';
           const rawMsgs = (fc.messages?.data || []).slice().reverse();
+          const lastRawMsg = rawMsgs[rawMsgs.length - 1];
+          const msgTimestamp = lastRawMsg?.created_time
+            ? new Date(lastRawMsg.created_time).getTime()
+            : (fc.updated_time ? new Date(fc.updated_time).getTime() : Date.now());
+
+          // Kiểm tra xem đây có phải là tin nhắn mới phát sinh hay không
+          const prevMsgId = lastMessageIdMapRef.current.get(`fb-${fc.id}`);
+          if (lastRawMsg?.id) {
+            if (!isFirstSyncRef.current && prevMsgId && prevMsgId !== lastRawMsg.id) {
+              // Có tin nhắn mới! Nếu người gửi là khách hàng -> bật cờ thông báo chuông
+              if (lastRawMsg.from?.id !== pageId) {
+                hasNewIncomingFromCustomer = true;
+              }
+            }
+            lastMessageIdMapRef.current.set(`fb-${fc.id}`, lastRawMsg.id);
+          }
 
           return {
             id: `fb-${fc.id}`,
@@ -559,47 +594,88 @@ export default function App() {
             pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
             unreadCount: fc.unread_count || 0,
             isReplied: false,
-            lastMessage: rawMsgs[rawMsgs.length - 1]?.message || 'Tin nhắn Messenger',
-            lastMessageTime: 'Mới đây',
+            lastMessage: lastRawMsg?.message || (lastRawMsg?.attachments ? '[Hình ảnh / Tệp]' : 'Tin nhắn Messenger'),
+            lastMessageTime: lastRawMsg?.created_time
+              ? new Date(lastRawMsg.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+              : 'Mới đây',
+            lastMessageTimestamp: msgTimestamp,
             assignedSalesName: 'Duy Kool (Admin)',
             pipelineStage: 'Đang tư vấn',
             tags: ['Facebook Fanpage', 'Live Chat'],
             messages: rawMsgs.map(rm => ({
               id: rm.id,
               sender: rm.from?.id === pageId ? 'sales' : 'customer',
-              senderName: rm.from?.name || '',
+              senderName: rm.from?.name || (rm.from?.id === pageId ? 'Xoăn Media' : custName),
               text: rm.message || '[Hình ảnh]',
               timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
             }))
           };
         });
 
+        if (isFirstSyncRef.current) {
+          isFirstSyncRef.current = false;
+        }
+
+        // Hợp nhất dữ liệu và sắp xếp cuộc trò chuyện có tin nhắn mới nhất lên ĐẦU DANH SÁCH
         setConversations(prev => {
-          const map = new Map(prev.map(c => [c.id, c]));
-          mapped.forEach(m => map.set(m.id, m));
-          return Array.from(map.values());
+          const prevMap = new Map(prev.map(c => [c.id, c]));
+          const mergedList: FacebookChatConversation[] = mapped.map(newC => {
+            const oldC = prevMap.get(newC.id);
+            if (!oldC) return newC;
+
+            // Giữ lại các metadata tùy chỉnh do sales gắn trên CRM (tag, pipeline, notes, phone...)
+            return {
+              ...oldC,
+              ...newC,
+              customerPhone: oldC.customerPhone || newC.customerPhone,
+              customerClass: oldC.customerClass || newC.customerClass,
+              customerSchool: oldC.customerSchool || newC.customerSchool,
+              tags: Array.from(new Set([...oldC.tags, ...newC.tags])),
+              pipelineStage: oldC.pipelineStage || newC.pipelineStage,
+              notes: oldC.notes || newC.notes,
+              // Nếu đang mở đúng cuộc chat này thì coi như đã đọc unreadCount = 0
+              unreadCount: activeId === newC.id ? 0 : (newC.unreadCount || oldC.unreadCount)
+            };
+          });
+
+          // Giữ các conversation khác không nằm trong đợt tải này
+          prev.forEach(c => {
+            if (!mapped.some(m => m.id === c.id)) {
+              mergedList.push(c);
+            }
+          });
+
+          // Tự động sắp xếp hội thoại có tin nhắn mới nhất lên đầu danh sách!
+          mergedList.sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0));
+
+          return mergedList;
         });
 
         if (mapped.length > 0) {
           setActiveId(prev => prev || mapped[0].id);
         }
 
+        if (hasNewIncomingFromCustomer) {
+          playNotificationSound();
+        }
+
         setFbSyncError(null);
-        playNotificationSound();
       } else {
         setConversations(prev => (prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev));
       }
     } catch (err: any) {
-      console.warn('Lỗi đồng bộ Facebook:', err);
-      const isExpired =
-        err.message?.includes('expired') ||
-        err.message?.includes('OAuthException') ||
-        err.message?.includes('190') ||
-        err.message?.includes('Session');
-      if (isExpired) {
-        setFbSyncError('⚠️ Token Facebook đã hết hạn. Hãy bấm nút "Cài Đặt Page" bên trên để dán Token mới nhé!');
-      } else {
-        setFbSyncError(`Lỗi đồng bộ: ${err.message || 'Không thể tải tin nhắn Facebook'}`);
+      if (!silent) {
+        console.warn('Lỗi đồng bộ Facebook:', err);
+        const isExpired =
+          err.message?.includes('expired') ||
+          err.message?.includes('OAuthException') ||
+          err.message?.includes('190') ||
+          err.message?.includes('Session');
+        if (isExpired) {
+          setFbSyncError('⚠️ Token Facebook đã hết hạn. Hãy bấm nút "Cài Đặt Page" bên trên để dán Token mới nhé!');
+        } else {
+          setFbSyncError(`Lỗi đồng bộ: ${err.message || 'Không thể tải tin nhắn Facebook'}`);
+        }
       }
       setConversations(prev => {
         const hasInvalid = prev.some(
@@ -611,7 +687,7 @@ export default function App() {
         return hasInvalid || prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev;
       });
     } finally {
-      setIsSyncingFb(false);
+      if (!silent) setIsSyncingFb(false);
     }
   };
 
@@ -748,6 +824,16 @@ export default function App() {
 
         {/* Right Tools */}
         <div className="flex items-center gap-2">
+          {/* Live Auto-Polling Status Badge */}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-extrabold select-none shadow-2xs"
+            title="Đang tự động quét và nhảy tin nhắn mới từ Fanpage mỗi 3.5 giây"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="hidden sm:inline">Tự Động Nhảy Tin (3.5s)</span>
+            <span className="sm:hidden">Live 3s</span>
+          </div>
+
           {/* Deep link button to CRM Xoan */}
           <a
             href="https://crm.xoanmedia.com"
@@ -762,13 +848,13 @@ export default function App() {
 
           {/* Sync Facebook Live */}
           <button
-            onClick={handleSyncFacebookLive}
+            onClick={() => handleSyncFacebookLive(false)}
             disabled={isSyncingFb}
             className="flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-            title="Đồng bộ tin nhắn mới từ Fanpage Facebook thật"
+            title="Bấm để làm mới tin nhắn ngay lập tức"
           >
             <RefreshCw className={`w-3 h-3 ${isSyncingFb ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{isSyncingFb ? 'Đang tải...' : 'Đồng bộ Facebook'}</span>
+            <span className="hidden sm:inline">{isSyncingFb ? 'Đang tải...' : 'Làm mới'}</span>
           </button>
         </div>
       </div>
@@ -968,7 +1054,7 @@ export default function App() {
                   </p>
                 </div>
                 <button
-                  onClick={handleSyncFacebookLive}
+                  onClick={() => handleSyncFacebookLive(false)}
                   disabled={isSyncingFb}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-xs transition-all cursor-pointer"
                 >
@@ -1335,7 +1421,7 @@ export default function App() {
               </p>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={handleSyncFacebookLive}
+                  onClick={() => handleSyncFacebookLive(false)}
                   disabled={isSyncingFb}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
                 >
