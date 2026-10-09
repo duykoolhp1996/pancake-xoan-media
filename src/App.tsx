@@ -121,7 +121,12 @@ export default function App() {
   // Auto select active conversation if list changes
   useEffect(() => {
     if (conversations.length === 0) {
-      if (activeId !== '') setActiveId('');
+      if (INITIAL_PANCAKE_CONVERSATIONS.length > 0) {
+        setConversations(INITIAL_PANCAKE_CONVERSATIONS);
+        setActiveId(INITIAL_PANCAKE_CONVERSATIONS[0].id);
+      } else {
+        if (activeId !== '') setActiveId('');
+      }
     } else if (!activeId || !conversations.some(c => c.id === activeId)) {
       setActiveId(conversations[0].id);
     }
@@ -199,6 +204,7 @@ export default function App() {
     isNeverExpires?: boolean;
     scopes?: string[];
   } | null>(null);
+  const [fbSyncError, setFbSyncError] = useState<string | null>(null);
 
   // Active Conversation
   const activeConv = conversations.find(c => c.id === activeId) || conversations[0];
@@ -247,7 +253,10 @@ export default function App() {
   const filteredConversations = useMemo(() => {
     return conversations.filter(c => {
       if (selectedChannelId !== 'all') {
-        if (c.channelId && c.channelId !== selectedChannelId) return false;
+        const selectedCh = PANCAKE_CHANNELS.find(ch => ch.id === selectedChannelId);
+        const matchChannelId = c.channelId === selectedChannelId;
+        const matchPlatform = selectedCh && c.channel === selectedCh.platform;
+        if (!matchChannelId && !matchPlatform) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -541,10 +550,24 @@ export default function App() {
           setActiveId(prev => prev || mapped[0].id);
         }
 
+        setFbSyncError(null);
         playNotificationSound();
+      } else {
+        setConversations(prev => (prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev));
       }
     } catch (err: any) {
       console.warn('Lỗi đồng bộ Facebook:', err);
+      const isExpired =
+        err.message?.includes('expired') ||
+        err.message?.includes('OAuthException') ||
+        err.message?.includes('190') ||
+        err.message?.includes('Session');
+      if (isExpired) {
+        setFbSyncError('⚠️ Token Facebook đã hết hạn. Hãy bấm nút "Cài Đặt Page" bên trên để dán Token mới nhé!');
+      } else {
+        setFbSyncError(`Lỗi đồng bộ: ${err.message || 'Không thể tải tin nhắn Facebook'}`);
+      }
+      setConversations(prev => (prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev));
     } finally {
       setIsSyncingFb(false);
     }
@@ -692,6 +715,30 @@ export default function App() {
         </div>
       </div>
 
+      {/* Facebook Token Error / Sync Warning Banner */}
+      {fbSyncError && (
+        <div className="bg-amber-400 text-neutral-950 px-4 py-2 flex items-center justify-between text-xs font-bold border-b border-amber-500 shadow-xs shrink-0 select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-950" />
+            <span className="truncate">{fbSyncError}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            <button
+              onClick={() => setShowFbConfigModal(true)}
+              className="px-2.5 py-1 bg-neutral-900 text-white hover:bg-neutral-800 rounded-lg text-[11px] font-black transition-colors cursor-pointer"
+            >
+              Cập Nhật Token Mới
+            </button>
+            <button
+              onClick={() => setFbSyncError(null)}
+              className="p-1 hover:bg-amber-500 rounded-md transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4 text-neutral-900" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================
           PANCAKE WORKSPACE: 4 COLUMNS LAYOUT
           ======================================================== */}
@@ -709,7 +756,7 @@ export default function App() {
                 ch.id === 'all'
                   ? conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0)
                   : conversations
-                      .filter(c => c.channelId === ch.id || (ch.id === 'fb-xoan-hn' && c.channel === 'facebook'))
+                      .filter(c => c.channelId === ch.id || c.channel === ch.platform)
                       .reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
               return (
@@ -1621,10 +1668,10 @@ export default function App() {
                 type="button"
                 onClick={handleTestFbConnection}
                 disabled={isTestingFb}
-                className="px-3.5 py-2 text-xs font-bold text-neutral-700 bg-white hover:bg-neutral-100 rounded-xl border border-neutral-200 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-3.5 py-2 text-xs font-bold text-neutral-800 bg-white hover:bg-neutral-100 rounded-xl border border-neutral-200 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                {isTestingFb ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5 text-blue-600" />}
-                <span>Kiểm Tra Token</span>
+                {isTestingFb ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-500" />}
+                <span>⚡ Kiểm Tra & Tự Kích Hoạt Token Vĩnh Viễn</span>
               </button>
 
               <div className="flex items-center gap-2">

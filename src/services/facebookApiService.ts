@@ -107,11 +107,26 @@ export class FacebookApiService {
   }
 
   /**
-   * Tự động giải nén Page Access Token nếu người dùng dán chuỗi User Token
+   * Tự động giải nén Page Access Token VĨNH VIỄN (Never Expire) từ chuỗi User Token
    */
   public static async resolvePageTokenIfUserToken(inputToken: string): Promise<{ pageToken: string; pageId: string; pageName: string } | null> {
     try {
-      const res = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(inputToken.trim())}`);
+      let activeUserToken = inputToken.trim();
+      const appId = this.getAppId();
+      const appSecret = this.getAppSecret();
+
+      // Thử đổi sang Long-Lived User Token qua fb_exchange_token
+      try {
+        const exRes = await fetch(
+          `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${encodeURIComponent(activeUserToken)}`
+        );
+        const exData = await exRes.json();
+        if (exData && exData.access_token) {
+          activeUserToken = exData.access_token;
+        }
+      } catch {}
+
+      const res = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(activeUserToken)}`);
       const data = await res.json();
       if (data && Array.isArray(data.data) && data.data.length > 0) {
         const targetPage = data.data.find((p: any) => p.id === '111065964964204' || p.name?.includes('Xoăn')) || data.data[0];
