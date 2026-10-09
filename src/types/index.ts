@@ -120,3 +120,12 @@ export interface SalesStaff {
   avatar?: string;
   isActive?: boolean;
 }
+
+export type AppView = 'inbox' | 'orders' | 'channels';
+
+export interface ToastMessage {
+  id: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  message: string;
+  duration?: number;
+}

@@ -1,86 +1,46 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import {
-  PANCAKE_CHANNELS,
-  PANCAKE_AVAILABLE_TAGS,
-  PANCAKE_QUICK_SCRIPTS,
-  INITIAL_PANCAKE_CONVERSATIONS,
-  PancakeChannel,
-  PancakeTagDef
-} from './data/mockPancakeData';
-import { FacebookApiService } from './services/facebookApiService';
-import { CrmApiService } from './services/crmApiService';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   FacebookChatConversation,
   FacebookChatMessage,
-  Customer,
   Booking,
   ServicePackage,
   SalesStaff,
-  PipelineStage
+  AppView
 } from './types';
-import { MessengerIcon } from './components/common/MessengerIcon';
-import { AiChatService, AiConversationAnalysis } from './services/aiChatService';
 import {
-  Search,
-  Send,
-  Phone,
-  ExternalLink,
-  ThumbsUp,
-  Image as ImageIcon,
-  CheckCheck,
-  User,
-  Tag,
-  DollarSign,
-  Calendar,
-  Sparkles,
-  MessageSquare,
-  Filter,
-  CheckCircle2,
-  Clock,
-  ChevronRight,
-  PlusCircle,
-  FileText,
-  AlertCircle,
-  PanelRightClose,
-  PanelRightOpen,
-  ArrowLeft,
-  RefreshCw,
-  Check,
-  X,
-  Share2,
-  ShoppingBag,
-  CreditCard,
-  QrCode,
-  Layers,
-  ChevronDown,
-  UserCheck,
-  Camera,
-  Building2,
-  Video,
-  Bot
-} from 'lucide-react';
+  PANCAKE_CHANNELS,
+  INITIAL_PANCAKE_CONVERSATIONS
+} from './data/mockPancakeData';
+import { FacebookApiService } from './services/facebookApiService';
+import { CrmApiService } from './services/crmApiService';
+import { AiChatService, AiConversationAnalysis } from './services/aiChatService';
+import { ToastProvider, useToast } from './components/ui/Toast';
+import { AppSidebar } from './components/layout/AppSidebar';
+import { AppHeader } from './components/layout/AppHeader';
+import { ChatConversationList } from './components/chat/ChatConversationList';
+import { ChatMessageStream } from './components/chat/ChatMessageStream';
+import { ChatRightPanel } from './components/chat/ChatRightPanel';
+import { OrdersView } from './components/orders/OrdersView';
+import { ChannelConfigModal } from './components/settings/ChannelConfigModal';
+import { X } from 'lucide-react';
 
-const STAGE_COLORS: Partial<Record<string, { bg: string; text: string; border: string }>> = {
-  'New Lead': { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
-  'Đã liên hệ': { bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-200' },
-  'Đang tư vấn': { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
-  'Đã gửi báo giá': { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
-  'Đang thương lượng': { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200' },
-  'Đã cọc': { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
-  'Đã đặt cọc': { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
-  'Book ngày': { bg: 'bg-teal-50', text: 'text-teal-700', border: 'border-teal-200' },
-  'Đã Booking': { bg: 'bg-teal-50', text: 'text-teal-700', border: 'border-teal-200' },
-  'Đã chụp': { bg: 'bg-sky-50', text: 'text-sky-700', border: 'border-sky-200' },
-  'Đang hậu kỳ': { bg: 'bg-cyan-50', text: 'text-cyan-700', border: 'border-cyan-200' },
-  'Giao ảnh': { bg: 'bg-lime-50', text: 'text-lime-700', border: 'border-lime-200' },
-  'Đã bàn giao': { bg: 'bg-lime-50', text: 'text-lime-700', border: 'border-lime-200' },
-  'Hoàn thành': { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' },
-  'Lost': { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
-  'Chăm sóc lại': { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200' },
-  'Mới tiếp nhận': { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' }
-};
+function PancakeAppContent() {
+  const toast = useToast();
 
-export default function App() {
+  // Navigation State
+  const [activeView, setActiveView] = useState<AppView>('inbox');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('pancake_sidebar_collapsed') === 'true';
+  });
+
+  const toggleSidebarCollapse = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('pancake_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
+
   // State: Conversations
   const [conversations, setConversations] = useState<FacebookChatConversation[]>(() => {
     const saved = localStorage.getItem('pancake_conversations');
@@ -88,7 +48,6 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // Xóa bỏ 100% data demo cũ VÀ dữ liệu kênh Duy Hiền Digital Marketing cũ
           const realOnly = parsed.filter(
             (c: any) =>
               c &&
@@ -111,8 +70,85 @@ export default function App() {
     return INITIAL_PANCAKE_CONVERSATIONS[0]?.id || '';
   });
 
-  // State: CRM API & Metadata
-  const [crmUrl, setCrmUrl] = useState<string>(CrmApiService.getBaseUrl());
+  // State: Draft messages per conversation
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('pancake_drafts');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {};
+  });
+
+  const handleSaveDraft = useCallback((convId: string, text: string) => {
+    setDrafts(prev => {
+      const next = { ...prev, [convId]: text };
+      localStorage.setItem('pancake_drafts', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // State: Orders & Bookings
+  const [bookings, setBookings] = useState<Booking[]>(() => {
+    const saved = localStorage.getItem('pancake_bookings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return [
+      {
+        id: 'bk-1001',
+        code: 'BK-849201',
+        customerId: 'cust-1',
+        customerName: 'Bạn Thu Thảo (Lớp Trưởng)',
+        className: '12A1',
+        schoolName: 'THPT Đông Hải',
+        shootDate: '2026-10-25',
+        location: 'Trường học + Phim trường Smiley Ville',
+        studentCount: 42,
+        packageName: 'Gói CONCEPT VIP (499k/bạn)',
+        packagePrice: 499000,
+        totalAmount: 20958000,
+        depositAmount: 2000000,
+        paymentStatus: 'Đã cọc',
+        bookingStatus: 'Chờ xếp ekip',
+        notes: 'Chụp concept Retro Hongkong 90s + Prom dạ hội',
+        createdAt: '09/10/2026 10:30'
+      },
+      {
+        id: 'bk-1002',
+        code: 'BK-519284',
+        customerId: 'cust-2',
+        customerName: 'Hoàng Minh Tuấn',
+        className: '12 Tin',
+        schoolName: 'THPT Chuyên Trần Phú',
+        shootDate: '2026-11-02',
+        location: 'Vịnh Lan Hạ & Bãi biển',
+        studentCount: 38,
+        packageName: 'Gói ĐIỆN ẢNH THE TRIP (699k/bạn)',
+        packagePrice: 699000,
+        totalAmount: 26562000,
+        depositAmount: 3000000,
+        paymentStatus: 'Đã cọc',
+        bookingStatus: 'Đã xếp Ekip',
+        notes: 'Chụp 2 ngày 1 đêm, có quay flycam 4K',
+        createdAt: '08/10/2026 15:45'
+      }
+    ];
+  });
+
+  const handleAddBooking = useCallback((booking: Booking) => {
+    setBookings(prev => {
+      const next = [booking, ...prev];
+      localStorage.setItem('pancake_bookings', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // State: CRM Metadata
   const [crmStatus, setCrmStatus] = useState<string>('connected');
   const [servicePackages, setServicePackages] = useState<ServicePackage[]>([
     { id: 'pkg-1', name: 'Gói BASIC (299k/bạn)', price: 299000 },
@@ -127,48 +163,38 @@ export default function App() {
     { id: 'sales-ai', name: '🤖 Bot AI Tư Vấn (Auto)' }
   ]);
 
+  // Filters State
+  const [selectedChannelId, setSelectedChannelId] = useState<string>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'unreplied' | 'unread' | 'has_phone' | 'deposited'>('all');
+  const [staffFilter, setStaffFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Panels & Views
+  const [showRightPanel, setShowRightPanel] = useState<boolean>(true);
+  const [rightPanelTab, setRightPanelTab] = useState<'customer' | 'ai' | 'pos'>('customer');
+  const [mobileChatView, setMobileChatView] = useState<'list' | 'chat'>('list');
+  const [showChannelModal, setShowChannelModal] = useState<boolean>(false);
+  const [previewLightboxUrl, setPreviewLightboxUrl] = useState<string | null>(null);
+
+  // Sync state
+  const [isSyncingFb, setIsSyncingFb] = useState(false);
+
   // Save conversations to localStorage
   useEffect(() => {
     localStorage.setItem('pancake_conversations', JSON.stringify(conversations));
   }, [conversations]);
 
-  // Auto select active conversation if list changes
+  // Auto select active conversation
   useEffect(() => {
     if (conversations.length === 0) {
       if (INITIAL_PANCAKE_CONVERSATIONS.length > 0) {
         setConversations(INITIAL_PANCAKE_CONVERSATIONS);
         setActiveId(INITIAL_PANCAKE_CONVERSATIONS[0].id);
-      } else {
-        if (activeId !== '') setActiveId('');
       }
     } else if (!activeId || !conversations.some(c => c.id === activeId)) {
       setActiveId(conversations[0].id);
     }
   }, [conversations, activeId]);
-
-  // Xóa bỏ triệt để dữ liệu cũ của kênh Duy Hiền Digital Marketing khỏi state & localStorage
-  useEffect(() => {
-    const hasOldDuyHien = conversations.some(
-      c =>
-        c.pageName?.includes('Duy Hiền') ||
-        c.customerName === 'Meta Business Agent' ||
-        c.channelId === 'fb-xoan-hn' ||
-        c.channelId === '411200738737677' ||
-        (c.channelId !== '111065964964204' && !c.pageName?.includes('Xoăn Media'))
-    );
-    if (hasOldDuyHien || conversations.length === 0) {
-      setConversations(INITIAL_PANCAKE_CONVERSATIONS);
-      setActiveId(INITIAL_PANCAKE_CONVERSATIONS[0]?.id || '');
-      localStorage.setItem('pancake_conversations', JSON.stringify(INITIAL_PANCAKE_CONVERSATIONS));
-    }
-  }, []);
-
-  const handleForceResetToXoanMedia = () => {
-    setConversations(INITIAL_PANCAKE_CONVERSATIONS);
-    setActiveId(INITIAL_PANCAKE_CONVERSATIONS[0]?.id || '');
-    localStorage.setItem('pancake_conversations', JSON.stringify(INITIAL_PANCAKE_CONVERSATIONS));
-    setFbSyncError(null);
-  };
 
   // Load CRM API data on startup
   useEffect(() => {
@@ -184,18 +210,17 @@ export default function App() {
       if (stf && stf.length > 0) setSalesStaff(stf);
     });
 
-    // Tự động tải tin nhắn thật từ Fanpage khi vào ứng dụng
-    handleSyncFacebookLive(false).catch(() => {});
+    // Auto sync on start
+    handleSyncFacebookLive(true).catch(() => {});
   }, []);
 
-  // Realtime Live Polling: Tự động quét và nhảy tin nhắn mới mỗi 2.5 giây
+  // Polling Live Facebook Messages (every 2.5s)
   useEffect(() => {
     const pollTimer = setInterval(() => {
       handleSyncFacebookLive(true).catch(() => {});
     }, 2500);
 
     const handleFocus = () => {
-      // Khi người dùng bấm chuột quay lại tab Pancake, quét ngay tức thì
       handleSyncFacebookLive(true).catch(() => {});
     };
     window.addEventListener('focus', handleFocus);
@@ -206,161 +231,7 @@ export default function App() {
     };
   }, []);
 
-  // Channel & Filter State
-  const [selectedChannelId, setSelectedChannelId] = useState<string>('all');
-  const [filterTab, setFilterTab] = useState<'all' | 'unreplied' | 'unread' | 'has_phone' | 'no_phone' | 'deposited'>('all');
-  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
-  const [staffFilter, setStaffFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-
-  // Mobile layout
-  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
-
-  // Right POS Panel
-  const [showRightPanel, setShowRightPanel] = useState(true);
-  const [rightPanelTab, setRightPanelTab] = useState<'customer' | 'ai' | 'pos' | 'templates' | 'tags'>('customer');
-  const [isAiReplying, setIsAiReplying] = useState(false);
-  const [aiInsightSuccess, setAiInsightSuccess] = useState<string | null>(null);
-
-  // Quick Reply dropdown / Slash shortcut popup
-  const [inputText, setInputText] = useState('');
-  const [showQuickReplyPopup, setShowQuickReplyPopup] = useState(false);
-  const [quickReplyFilter, setQuickReplyFilter] = useState('');
-
-  // Dropdown states
-  const [showTagMenu, setShowTagMenu] = useState(false);
-  const [showAssignStaffMenu, setShowAssignStaffMenu] = useState(false);
-
-  // Editable Customer Info
-  const [editCustName, setEditCustName] = useState('');
-  const [editCustPhone, setEditCustPhone] = useState('');
-  const [editCustClass, setEditCustClass] = useState('');
-  const [editCustSchool, setEditCustSchool] = useState('');
-  const [noteText, setNoteText] = useState('');
-
-  // Pancake POS Quick Order State
-  const [posSelectedPackage, setPosSelectedPackage] = useState(servicePackages[1]?.name || 'Gói CONCEPT VIP (499k/bạn)');
-  const [posPackagePrice, setPosPackagePrice] = useState(servicePackages[1]?.price || 499000);
-  const [posStudentCount, setPosStudentCount] = useState(40);
-  const [posDepositAmount, setPosDepositAmount] = useState(2000000);
-  const [posShootDate, setPosShootDate] = useState(new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]);
-  const [posLocation, setPosLocation] = useState('Trường học + Phim trường');
-  const [posNotes, setPosNotes] = useState('');
-  const [posSuccessMsg, setPosSuccessMsg] = useState<string | null>(null);
-
-  // Facebook & Webhook Config Modal State
-  const [showFbConfigModal, setShowFbConfigModal] = useState(false);
-  const [fbTokenInput, setFbTokenInput] = useState(FacebookApiService.getPageToken());
-  const [fbPageIdInput, setFbPageIdInput] = useState(FacebookApiService.getPageId());
-  const [fbConfigStatus, setFbConfigStatus] = useState<string | null>(null);
-  const [isTestingFb, setIsTestingFb] = useState(false);
-  const [isSyncingFb, setIsSyncingFb] = useState(false);
-  const [fbTestSuccess, setFbTestSuccess] = useState<{
-    name: string;
-    id: string;
-    pictureUrl?: string;
-    isNeverExpires?: boolean;
-    scopes?: string[];
-  } | null>(null);
-  const [fbSyncError, setFbSyncError] = useState<string | null>(null);
-
-  // Image Upload & Attachment State
-  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
-  const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null);
-  const [previewLightboxUrl, setPreviewLightboxUrl] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Active Conversation
-  const activeConv = conversations.find(c => c.id === activeId) || conversations[0];
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeConv?.messages]);
-
-  useEffect(() => {
-    if (activeConv) {
-      if (activeConv.unreadCount > 0) {
-        setConversations(prev =>
-          prev.map(c => (c.id === activeConv.id ? { ...c, unreadCount: 0 } : c))
-        );
-      }
-      setEditCustName(activeConv.customerName || '');
-      setEditCustPhone(activeConv.customerPhone || '');
-      setEditCustClass(activeConv.customerClass || '');
-      setEditCustSchool(activeConv.customerSchool || '');
-      setNoteText(activeConv.notes || '');
-    }
-  }, [activeConv?.id]);
-
-  // AI Realtime Conversation Analysis
-  const aiAnalysis = useMemo<AiConversationAnalysis>(() => {
-    if (!activeConv) {
-      return {
-        customerIntent: 'Đang chờ hội thoại...',
-        customerPersonality: 'Bình thường',
-        interestLevel: 'Mới tìm hiểu (Cold)',
-        suggestedReplies: []
-      };
-    }
-    return AiChatService.analyze(activeConv.customerName, activeConv.messages);
-  }, [activeConv?.id, activeConv?.messages, activeConv?.customerName]);
-
-  const handleApplyAiInsights = () => {
-    if (!activeConv) return;
-    if (aiAnalysis.detectedSchool) setEditCustSchool(aiAnalysis.detectedSchool);
-    if (aiAnalysis.detectedClass) setEditCustClass(aiAnalysis.detectedClass);
-    if (aiAnalysis.detectedPhone) setEditCustPhone(aiAnalysis.detectedPhone);
-    const newNote = noteText ? `${noteText}\n[AI Phân Tích]: ${aiAnalysis.customerPersonality}` : `[AI Phân Tích]: ${aiAnalysis.customerPersonality}`;
-    setNoteText(newNote);
-    setAiInsightSuccess('🎉 Đã đồng bộ thông tin AI phân tích vào Hồ sơ!');
-    setTimeout(() => setAiInsightSuccess(null), 3000);
-  };
-
-  const handleAssignStaff = (convId: string, staffName: string) => {
-    setConversations(prev =>
-      prev.map(c => (c.id === convId ? { ...c, assignedSalesName: staffName } : c))
-    );
-  };
-
-  const handleAiSendReply = async (replyText: string) => {
-    if (!activeConv || !replyText.trim() || isAiReplying) return;
-    setIsAiReplying(true);
-    const recipientPsid = activeConv.facebookPsid || (activeConv.id.startsWith('t_') ? activeConv.id.replace('t_', '') : activeConv.id);
-    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-    const newMsg: FacebookChatMessage = {
-      id: `msg-ai-${Date.now()}`,
-      sender: 'sales',
-      senderName: activeConv.assignedSalesName || '🤖 Bot AI Tư Vấn (Auto)',
-      text: replyText.trim(),
-      timestamp: nowTime
-    };
-
-    setConversations(prev =>
-      prev.map(c =>
-        c.id === activeConv.id
-          ? {
-              ...c,
-              lastMessage: replyText.trim(),
-              lastMessageTime: 'Vừa xong',
-              messages: [...c.messages, newMsg]
-            }
-          : c
-      )
-    );
-
-    try {
-      if (recipientPsid) {
-        await FacebookApiService.sendMessage(recipientPsid, replyText.trim());
-      }
-    } catch (err: any) {
-      console.warn('Lỗi AI gửi tin nhắn:', err);
-    } finally {
-      setIsAiReplying(false);
-    }
-  };
-
-  // Audio Ting Ting
+  // Sound ting ting
   const playNotificationSound = () => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -379,6 +250,11 @@ export default function App() {
       osc.stop(ctx.currentTime + 0.25);
     } catch {}
   };
+
+  // Active Conversation
+  const activeConv = useMemo(() => {
+    return conversations.find(c => c.id === activeId) || conversations[0] || null;
+  }, [conversations, activeId]);
 
   // Filtered Conversations
   const filteredConversations = useMemo(() => {
@@ -401,81 +277,147 @@ export default function App() {
       if (filterTab === 'unreplied' && c.isReplied) return false;
       if (filterTab === 'unread' && (!c.unreadCount || c.unreadCount <= 0)) return false;
       if (filterTab === 'has_phone' && !c.customerPhone) return false;
-      if (filterTab === 'no_phone' && c.customerPhone) return false;
       if (filterTab === 'deposited') {
         const hasDepTag = c.tags.some(t => t.includes('cọc') || t.includes('Cọc'));
         const hasDepStage = c.pipelineStage?.includes('cọc') || c.pipelineStage?.includes('Booking');
         if (!hasDepTag && !hasDepStage) return false;
       }
-      if (selectedTagFilter && !c.tags.includes(selectedTagFilter)) return false;
       if (staffFilter !== 'all' && c.assignedSalesName !== staffFilter) return false;
       return true;
     });
-  }, [conversations, selectedChannelId, searchQuery, filterTab, selectedTagFilter, staffFilter]);
+  }, [conversations, selectedChannelId, searchQuery, filterTab, staffFilter]);
 
-  // Ref khóa chống gửi tin nhắn đúp (Debounce / Double-send guard)
-  const isSendingRef = useRef<boolean>(false);
-
-  // Xử lý chọn ảnh từ file picker
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      setSelectedImageFile(file);
-      setSelectedImagePreview(URL.createObjectURL(file));
+  // AI Realtime Analysis
+  const aiAnalysis = useMemo<AiConversationAnalysis>(() => {
+    if (!activeConv) {
+      return {
+        customerIntent: 'Đang chờ hội thoại...',
+        customerPersonality: 'Bình thường',
+        interestLevel: 'Mới tìm hiểu (Cold)',
+        suggestedReplies: []
+      };
     }
-    if (e.target) e.target.value = '';
-  };
+    return AiChatService.analyze(activeConv.customerName, activeConv.messages);
+  }, [activeConv?.id, activeConv?.messages, activeConv?.customerName]);
 
-  // Xử lý dán ảnh trực tiếp từ clipboard (Ctrl+V / Cmd+V)
-  const handlePasteInChat = (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile();
-        if (file) {
-          e.preventDefault();
-          setSelectedImageFile(file);
-          setSelectedImagePreview(URL.createObjectURL(file));
-          break;
+  // Total Unread Count
+  const totalUnreadCount = useMemo(() => {
+    return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+  }, [conversations]);
+
+  // Refs for realtime deduplication & tracking
+  const lastMessageIdMapRef = useRef<Map<string, string>>(new Map());
+  const isFirstSyncRef = useRef<boolean>(true);
+
+  // Sync Facebook Live
+  const handleSyncFacebookLive = async (silent: boolean = false) => {
+    if (!silent) setIsSyncingFb(true);
+    try {
+      const fbConvs = await FacebookApiService.getConversations();
+      const pageId = FacebookApiService.getPageId();
+
+      if (fbConvs && fbConvs.length > 0) {
+        let hasNewIncomingFromCustomer = false;
+
+        const mapped: FacebookChatConversation[] = fbConvs.map(fc => {
+          const custPart = fc.participants?.data?.find(p => p.id !== pageId) || fc.participants?.data?.[0];
+          const psid = custPart?.id || '';
+          const custName = custPart?.name || 'Khách Hàng Facebook';
+          const rawMsgs = (fc.messages?.data || []).slice().reverse();
+          const lastRawMsg = rawMsgs[rawMsgs.length - 1];
+
+          // Realtime new incoming detector
+          const prevMsgId = lastMessageIdMapRef.current.get(`fb-${fc.id}`);
+          if (lastRawMsg?.id) {
+            if (!isFirstSyncRef.current && prevMsgId && prevMsgId !== lastRawMsg.id) {
+              if (lastRawMsg.from?.id !== pageId) {
+                hasNewIncomingFromCustomer = true;
+              }
+            }
+            lastMessageIdMapRef.current.set(`fb-${fc.id}`, lastRawMsg.id);
+          }
+
+          const existing = conversations.find(c => c.id === `fb-${fc.id}`);
+
+          return {
+            id: `fb-${fc.id}`,
+            customerId: existing?.customerId || `cust-fb-${fc.id}`,
+            customerName: existing?.customerName || custName,
+            customerAvatar:
+              existing?.customerAvatar ||
+              `https://ui-avatars.com/api/?name=${encodeURIComponent(custName)}&background=0084FF&color=fff&bold=true`,
+            customerClass: existing?.customerClass,
+            customerSchool: existing?.customerSchool,
+            customerPhone: existing?.customerPhone,
+            facebookPsid: psid,
+            isLiveFacebook: true,
+            channel: 'facebook',
+            channelId: '111065964964204',
+            pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
+            unreadCount: fc.unread_count || 0,
+            isReplied: existing ? existing.isReplied : (lastRawMsg ? lastRawMsg.from?.id === pageId : true),
+            lastMessage: lastRawMsg?.message || '[Tin nhắn hình ảnh / tệp]',
+            lastMessageTime: lastRawMsg?.created_time
+              ? new Date(lastRawMsg.created_time).toLocaleTimeString('vi-VN', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              : 'Gần đây',
+            assignedSalesName: existing?.assignedSalesName || 'Duy Kool (Admin)',
+            pipelineStage: existing?.pipelineStage || 'New Lead',
+            tags: existing?.tags || ['Facebook Live'],
+            notes: existing?.notes,
+            messages: rawMsgs.map(rm => ({
+              id: rm.id,
+              sender: rm.from?.id === pageId ? 'sales' : 'customer',
+              senderName: rm.from?.id === pageId ? 'Xoăn Media' : custName,
+              text: rm.message || '',
+              timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', {
+                hour: '2-digit',
+                minute: '2-digit'
+              }),
+              attachments: rm.attachments?.data?.map(att => ({
+                type: 'image',
+                url: att.image_data?.url || att.file_url || ''
+              }))
+            }))
+          };
+        });
+
+        isFirstSyncRef.current = false;
+        setConversations(mapped);
+
+        if (hasNewIncomingFromCustomer) {
+          playNotificationSound();
+          toast.info('🔔 Có tin nhắn mới từ khách hàng trên Fanpage!');
         }
       }
+    } catch (err: any) {
+      if (!silent) {
+        toast.error(`Lỗi đồng bộ: ${err.message || 'Không thể tải tin nhắn Facebook'}`);
+      }
+    } finally {
+      if (!silent) setIsSyncingFb(false);
     }
   };
 
-  // Send message (hỗ trợ cả text và hình ảnh)
-  const handleSendMessage = async (textToSend?: string) => {
-    if (isSendingRef.current) return; // Đang gửi -> chặn click/enter đúp ngay lập tức
-
-    const content = (textToSend !== undefined ? textToSend : inputText).trim();
-    const imageFile = selectedImageFile;
-    const imagePreview = selectedImagePreview;
-
-    // Phải có ít nhất nội dung text hoặc file ảnh
-    if (!content && !imageFile) return;
+  // Send message
+  const handleSendMessage = async (content: string, imageFile: File | null) => {
     if (!activeConv) return;
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
-    isSendingRef.current = true;
-
-    // Xóa input và preview ảnh ngay tức thì
-    if (textToSend === undefined) {
-      setInputText('');
-      setShowQuickReplyPopup(false);
+    let previewUrl: string | undefined = undefined;
+    if (imageFile) {
+      previewUrl = URL.createObjectURL(imageFile);
     }
-    setSelectedImageFile(null);
-    setSelectedImagePreview(null);
-
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-    const displayText = content || (imageFile ? '[Hình ảnh]' : '');
 
     const newMsg: FacebookChatMessage = {
       id: `msg-${Date.now()}`,
       sender: 'sales',
-      senderName: 'Sales Tư Vấn',
+      senderName: activeConv.assignedSalesName || 'Sales Tư Vấn',
       text: content,
-      timestamp: timeStr,
-      attachments: imagePreview ? [{ type: 'image', url: imagePreview, name: imageFile?.name }] : undefined
+      timestamp: nowTime,
+      attachments: previewUrl ? [{ type: 'image', url: previewUrl }] : undefined
     };
 
     setConversations(prev =>
@@ -483,9 +425,8 @@ export default function App() {
         c.id === activeConv.id
           ? {
               ...c,
-              lastMessage: displayText,
-              lastMessageTime: timeStr,
-              lastMessageTimestamp: now.getTime(),
+              lastMessage: content || '[Hình ảnh]',
+              lastMessageTime: nowTime,
               isReplied: true,
               messages: [...c.messages, newMsg]
             }
@@ -493,42 +434,61 @@ export default function App() {
       )
     );
 
-    // Cuộn tức thì 0s xuống cuối danh sách tin nhắn
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 20);
-
-    // Call Facebook API if connected
+    // Call Facebook API if live
     if (activeConv.facebookPsid) {
       try {
         if (imageFile) {
-          // Gửi file ảnh qua Facebook Graph API
           await FacebookApiService.sendImageMessage(activeConv.facebookPsid, imageFile);
-          // Nếu có nội dung text chú thích kèm theo ảnh
           if (content) {
             await FacebookApiService.sendMessage(activeConv.facebookPsid, content);
           }
         } else {
-          // Gửi tin nhắn text thông thường
           await FacebookApiService.sendMessage(activeConv.facebookPsid, content);
         }
         setTimeout(() => handleSyncFacebookLive(true), 800);
-      } catch (err) {
-        console.error('Lỗi gửi Facebook API:', err);
-      } finally {
-        // Nhả khóa sau 500ms
-        setTimeout(() => {
-          isSendingRef.current = false;
-        }, 500);
+      } catch (err: any) {
+        toast.error(`Lỗi gửi Facebook API: ${err.message}`);
       }
-    } else {
-      setTimeout(() => {
-        isSendingRef.current = false;
-      }, 500);
     }
   };
 
-  // Quick Card VietQR
+  // Send Quote Card
+  const handleSendQuoteCard = () => {
+    if (!activeConv) return;
+    const newMsg: FacebookChatMessage = {
+      id: `msg-q-${Date.now()}`,
+      sender: 'sales',
+      senderName: 'Sales Tư Vấn',
+      text: '📸 Xoăn Media gửi bạn bảng báo giá chi tiết cho lớp:',
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      cardType: 'quote',
+      cardData: {
+        packageName: servicePackages[1]?.name || 'Gói CONCEPT VIP (499k/bạn)',
+        packagePrice: servicePackages[1]?.price || 499000,
+        studentCount: 40,
+        totalAmount: 19960000,
+        depositAmount: 2000000,
+        location: 'Trường học + Phim trường'
+      }
+    };
+
+    setConversations(prev =>
+      prev.map(c =>
+        c.id === activeConv.id
+          ? {
+              ...c,
+              lastMessage: `[Báo giá kỷ yếu]`,
+              lastMessageTime: newMsg.timestamp,
+              isReplied: true,
+              messages: [...c.messages, newMsg]
+            }
+          : c
+      )
+    );
+    toast.success('Đã gửi Thẻ Báo Giá vào khung chat');
+  };
+
+  // Send VietQR Card
   const handleSendVietQrCard = () => {
     if (!activeConv) return;
     const newMsg: FacebookChatMessage = {
@@ -560,1829 +520,151 @@ export default function App() {
           : c
       )
     );
+    toast.success('Đã gửi Thẻ VietQR chuyển khoản vào khung chat');
   };
 
-  // Quick Card Quote
-  const handleSendQuoteCard = () => {
-    if (!activeConv) return;
-    const count = Number(posStudentCount) || 40;
-    const price = Number(posPackagePrice) || 499000;
-    const total = count * price;
+  // AI Send Reply
+  const handleAiSendReply = async (replyText: string) => {
+    if (!activeConv || !replyText.trim()) return;
+    await handleSendMessage(replyText.trim(), null);
+    toast.success('🤖 AI đã phản hồi tin nhắn thành công!');
+  };
 
-    const newMsg: FacebookChatMessage = {
-      id: `msg-q-${Date.now()}`,
-      sender: 'sales',
-      senderName: 'Sales Tư Vấn',
-      text: '📸 Xoăn Media gửi bạn bảng báo giá chi tiết cho lớp:',
-      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-      cardType: 'quote',
-      cardData: {
-        packageName: posSelectedPackage,
-        packagePrice: price,
-        studentCount: count,
-        totalAmount: total,
-        depositAmount: 2000000,
-        shootDate: posShootDate,
-        location: posLocation
-      }
-    };
-
+  // Assign Staff
+  const handleAssignStaff = (convId: string, staffName: string) => {
     setConversations(prev =>
-      prev.map(c =>
-        c.id === activeConv.id
-          ? {
-              ...c,
-              lastMessage: `[Báo giá: ${posSelectedPackage}]`,
-              lastMessageTime: newMsg.timestamp,
-              isReplied: true,
-              messages: [...c.messages, newMsg]
-            }
-          : c
-      )
+      prev.map(c => (c.id === convId ? { ...c, assignedSalesName: staffName } : c))
     );
   };
 
-  // Save Customer Info to CRM API
-  const handleSaveCustomerInfo = async () => {
+  // Update Conversation
+  const handleUpdateConversation = (updated: Partial<FacebookChatConversation>) => {
     if (!activeConv) return;
-
-    // Local update
     setConversations(prev =>
-      prev.map(c =>
-        c.id === activeConv.id
-          ? {
-              ...c,
-              customerName: editCustName || c.customerName,
-              customerPhone: editCustPhone || c.customerPhone,
-              customerClass: editCustClass || c.customerClass,
-              customerSchool: editCustSchool || c.customerSchool,
-              notes: noteText
-            }
-          : c
-      )
+      prev.map(c => (c.id === activeConv.id ? { ...c, ...updated } : c))
     );
-
-    // REST API call to CRM
-    await CrmApiService.saveCustomer({
-      id: activeConv.customerId,
-      name: editCustName || activeConv.customerName,
-      phone: editCustPhone || activeConv.customerPhone,
-      className: editCustClass || activeConv.customerClass,
-      schoolName: editCustSchool || activeConv.customerSchool,
-      notes: noteText
-    });
-
-    setPosSuccessMsg('Đã lưu thông tin khách hàng vào CRM API!');
-    setTimeout(() => setPosSuccessMsg(null), 3000);
-  };
-
-  // Pancake POS: Create Quick Booking to CRM
-  const handleCreatePosBooking = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeConv) return;
-
-    const bookingCode = `BK-${Math.floor(100000 + Math.random() * 900000)}`;
-    const studentCount = Number(posStudentCount) || 40;
-    const packagePrice = Number(posPackagePrice) || 499000;
-    const totalAmount = studentCount * packagePrice;
-    const depositAmount = Number(posDepositAmount) || 2000000;
-
-    // 1. Send Booking Success Card to Chat
-    const newMsg: FacebookChatMessage = {
-      id: `msg-bk-${Date.now()}`,
-      sender: 'sales',
-      senderName: 'Pancake POS',
-      text: `🎉 Đã tạo đơn thành công mã ${bookingCode}! Lịch chụp đã được khóa trên CRM.`,
-      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-      cardType: 'booking_success',
-      cardData: {
-        bookingCode,
-        packageName: posSelectedPackage,
-        packagePrice,
-        studentCount,
-        totalAmount,
-        depositAmount,
-        shootDate: posShootDate,
-        location: posLocation
-      }
-    };
-
-    setConversations(prev =>
-      prev.map(c =>
-        c.id === activeConv.id
-          ? {
-              ...c,
-              pipelineStage: 'Đã Booking',
-              tags: Array.from(new Set([...c.tags, '💰 Đã cọc VietQR'])),
-              lastMessage: `[Chốt Đơn: ${bookingCode}]`,
-              lastMessageTime: newMsg.timestamp,
-              isReplied: true,
-              messages: [...c.messages, newMsg]
-            }
-          : c
-      )
-    );
-
-    // 2. Call CRM REST API
-    await CrmApiService.createBooking({
-      code: bookingCode,
-      customerId: activeConv.customerId || `cust-${Date.now()}`,
-      customerName: editCustName || activeConv.customerName,
-      className: editCustClass || activeConv.customerClass || '',
-      schoolName: editCustSchool || activeConv.customerSchool || '',
-      shootDate: posShootDate,
-      location: posLocation,
-      studentCount,
-      packageName: posSelectedPackage,
-      packagePrice,
-      totalAmount,
-      depositAmount,
-      paymentStatus: 'Đã cọc',
-      bookingStatus: 'Chờ xếp ekip',
-      notes: posNotes
-    });
-
-    setPosSuccessMsg(`🎉 Đã tạo đơn ${bookingCode} & đồng bộ thành công vào CRM!`);
-    setTimeout(() => setPosSuccessMsg(null), 4000);
-  };
-
-  // Refs theo dõi tin nhắn cuối cùng để phát hiện tin nhắn mới Realtime
-  const lastMessageIdMapRef = useRef<Map<string, string>>(new Map());
-  const isFirstSyncRef = useRef<boolean>(true);
-
-  // Sync Facebook Live Conversations (hỗ trợ silent mode cho auto-polling nền)
-  const handleSyncFacebookLive = async (silent: boolean = false) => {
-    if (!silent) setIsSyncingFb(true);
-    try {
-      const fbConvs = await FacebookApiService.getConversations();
-      const pageId = FacebookApiService.getPageId();
-
-      if (fbConvs && fbConvs.length > 0) {
-        let hasNewIncomingFromCustomer = false;
-
-        const mapped: FacebookChatConversation[] = fbConvs.map(fc => {
-          const custPart = fc.participants?.data?.find(p => p.id !== pageId) || fc.participants?.data?.[0];
-          const psid = custPart?.id || '';
-          const custName = custPart?.name || 'Khách Hàng Facebook';
-          const rawMsgs = (fc.messages?.data || []).slice().reverse();
-          const lastRawMsg = rawMsgs[rawMsgs.length - 1];
-          const msgTimestamp = lastRawMsg?.created_time
-            ? new Date(lastRawMsg.created_time).getTime()
-            : (fc.updated_time ? new Date(fc.updated_time).getTime() : Date.now());
-
-          // Kiểm tra xem đây có phải là tin nhắn mới phát sinh hay không
-          const prevMsgId = lastMessageIdMapRef.current.get(`fb-${fc.id}`);
-          if (lastRawMsg?.id) {
-            if (!isFirstSyncRef.current && prevMsgId && prevMsgId !== lastRawMsg.id) {
-              // Có tin nhắn mới! Nếu người gửi là khách hàng -> bật cờ thông báo chuông
-              if (lastRawMsg.from?.id !== pageId) {
-                hasNewIncomingFromCustomer = true;
-              }
-            }
-            lastMessageIdMapRef.current.set(`fb-${fc.id}`, lastRawMsg.id);
-          }
-
-            // Khử trùng lặp tin nhắn nếu bị gửi đúp cùng lúc từ Facebook API
-            const dedupRawMsgs = rawMsgs.filter((rm, idx, arr) => {
-              if (idx === 0) return true;
-              const prev = arr[idx - 1];
-              if (rm.id && prev.id && rm.id === prev.id) return false;
-              const isSameSender = rm.from?.id === prev.from?.id;
-              const isSameText = (rm.message || '').trim() === (prev.message || '').trim() && (rm.message || '').trim() !== '';
-              const isCloseTime = Math.abs(new Date(rm.created_time).getTime() - new Date(prev.created_time).getTime()) < 5000;
-              if (isSameSender && isSameText && isCloseTime) return false;
-              return true;
-            });
-
-            return {
-              id: `fb-${fc.id}`,
-              facebookPsid: psid,
-              isLiveFacebook: true,
-              customerName: custName,
-              customerAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(custName)}&background=0084FF&color=fff&bold=true`,
-              customerClass: 'Khách Fanpage Live',
-              customerSchool: 'Facebook Messenger',
-              channel: 'facebook',
-              channelId: pageId,
-              pageName: 'Xoăn Media - Chụp Ảnh Kỷ Yếu',
-              unreadCount: fc.unread_count || 0,
-              isReplied: false,
-              lastMessage: lastRawMsg?.message || (lastRawMsg?.attachments ? '[Hình ảnh / Tệp]' : 'Tin nhắn Messenger'),
-              lastMessageTime: lastRawMsg?.created_time
-                ? new Date(lastRawMsg.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-                : 'Mới đây',
-              lastMessageTimestamp: msgTimestamp,
-              assignedSalesName: 'Duy Kool (Admin)',
-              pipelineStage: 'Đang tư vấn',
-              tags: ['Facebook Fanpage', 'Live Chat'],
-              messages: dedupRawMsgs.map(rm => ({
-                id: rm.id,
-                sender: rm.from?.id === pageId ? 'sales' : 'customer',
-                senderName: rm.from?.name || (rm.from?.id === pageId ? 'Xoăn Media' : custName),
-                text: rm.message || (rm.attachments?.data?.length ? '' : '[Hình ảnh]'),
-                timestamp: new Date(rm.created_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-                attachments: rm.attachments?.data?.map(att => ({
-                  type: 'image' as const,
-                  url: att.image_data?.url || att.file_url || ''
-                })).filter(a => !!a.url)
-              }))
-            };
-        });
-
-        if (isFirstSyncRef.current) {
-          isFirstSyncRef.current = false;
-        }
-
-        // Hợp nhất dữ liệu và sắp xếp cuộc trò chuyện có tin nhắn mới nhất lên ĐẦU DANH SÁCH
-        setConversations(prev => {
-          const prevMap = new Map(prev.map(c => [c.id, c]));
-          const mergedList: FacebookChatConversation[] = mapped.map(newC => {
-            const oldC = prevMap.get(newC.id);
-            if (!oldC) return newC;
-
-            // Bảo toàn các tin nhắn local đang chờ (optimistic messages có id bắt đầu bằng 'msg-')
-            // mà Facebook chưa kịp trả về trong đợt sync này
-            const pendingLocalMsgs = oldC.messages.filter(om => 
-              om.id.startsWith('msg-') && 
-              !newC.messages.some(nm => 
-                nm.sender === om.sender && 
-                nm.text.trim() === om.text.trim()
-              )
-            );
-
-            // Gộp tin nhắn từ Facebook và tin nhắn local đang chờ để không bị mất hay giật 2s
-            const mergedMessages = [...newC.messages, ...pendingLocalMsgs];
-            const lastMsg = mergedMessages[mergedMessages.length - 1];
-
-            // Giữ lại các metadata tùy chỉnh do sales gắn trên CRM (tag, pipeline, notes, phone...)
-            return {
-              ...oldC,
-              ...newC,
-              messages: mergedMessages,
-              lastMessage: lastMsg?.text || newC.lastMessage,
-              lastMessageTime: lastMsg?.timestamp || newC.lastMessageTime,
-              customerPhone: oldC.customerPhone || newC.customerPhone,
-              customerClass: oldC.customerClass || newC.customerClass,
-              customerSchool: oldC.customerSchool || newC.customerSchool,
-              tags: Array.from(new Set([...oldC.tags, ...newC.tags])),
-              pipelineStage: oldC.pipelineStage || newC.pipelineStage,
-              notes: oldC.notes || newC.notes,
-              // Nếu đang mở đúng cuộc chat này thì coi như đã đọc unreadCount = 0
-              unreadCount: activeId === newC.id ? 0 : (newC.unreadCount || oldC.unreadCount)
-            };
-          });
-
-          // Giữ các conversation khác không nằm trong đợt tải này
-          prev.forEach(c => {
-            if (!mapped.some(m => m.id === c.id)) {
-              mergedList.push(c);
-            }
-          });
-
-          // Tự động sắp xếp hội thoại có tin nhắn mới nhất lên đầu danh sách!
-          mergedList.sort((a, b) => (b.lastMessageTimestamp || 0) - (a.lastMessageTimestamp || 0));
-
-          return mergedList;
-        });
-
-        if (mapped.length > 0) {
-          setActiveId(prev => prev || mapped[0].id);
-        }
-
-        if (hasNewIncomingFromCustomer) {
-          playNotificationSound();
-        }
-
-        setFbSyncError(null);
-      } else {
-        setConversations(prev => (prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev));
-      }
-    } catch (err: any) {
-      if (!silent) {
-        console.warn('Lỗi đồng bộ Facebook:', err);
-        const isExpired =
-          err.message?.includes('expired') ||
-          err.message?.includes('OAuthException') ||
-          err.message?.includes('190') ||
-          err.message?.includes('Session');
-        if (isExpired) {
-          setFbSyncError('⚠️ Phiên kết nối Fanpage Facebook đã hết hạn hoặc cần cấp lại quyền truy cập.');
-        } else {
-          setFbSyncError(`Lỗi đồng bộ: ${err.message || 'Không thể tải tin nhắn Facebook'}`);
-        }
-      }
-      setConversations(prev => {
-        const hasInvalid = prev.some(
-          c =>
-            c.pageName?.includes('Duy Hiền') ||
-            c.customerName === 'Meta Business Agent' ||
-            (c.channelId !== '111065964964204' && !c.pageName?.includes('Xoăn Media'))
-        );
-        return hasInvalid || prev.length === 0 ? INITIAL_PANCAKE_CONVERSATIONS : prev;
-      });
-    } finally {
-      if (!silent) setIsSyncingFb(false);
-    }
-  };
-
-  // Test Facebook Token
-  const handleTestFbConnection = async () => {
-    if (!fbTokenInput.trim()) {
-      setFbConfigStatus('Vui lòng nhập Page Access Token trước khi kiểm tra.');
-      return;
-    }
-    setIsTestingFb(true);
-    setFbConfigStatus(null);
-    try {
-      let activeToken = fbTokenInput.trim();
-      let res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,picture{url}&access_token=${activeToken}`);
-      let data = await res.json();
-
-      // Nếu token là User Token (tài khoản cá nhân quản trị viên), tự động trích xuất Page Token
-      const pageExtraction = await FacebookApiService.resolvePageTokenIfUserToken(activeToken);
-      if (pageExtraction) {
-        activeToken = pageExtraction.pageToken;
-        setFbTokenInput(activeToken);
-        setFbPageIdInput(pageExtraction.pageId);
-        FacebookApiService.setPageToken(activeToken);
-        FacebookApiService.setPageId(pageExtraction.pageId);
-
-        // Fetch lại thông tin của chính Fanpage
-        res = await fetch(`https://graph.facebook.com/v19.0/me?fields=id,name,picture{url}&access_token=${activeToken}`);
-        data = await res.json();
-      }
-
-      if (!res.ok) throw new Error(data.error?.message || 'Token không hợp lệ hoặc đã hết hạn.');
-
-      const debugData = await FacebookApiService.debugToken(activeToken).catch(() => null);
-      const isNeverExpires = debugData ? debugData.expires_at === 0 : false;
-      const scopes = debugData?.scopes || [];
-
-      setFbTestSuccess({
-        name: data.name,
-        id: data.id,
-        pictureUrl: data.picture?.data?.url,
-        isNeverExpires,
-        scopes
-      });
-      if (!fbPageIdInput) setFbPageIdInput(data.id);
-      setFbConfigStatus(`✅ Kết nối thành công tới Fanpage: "${data.name}" (ID: ${data.id})`);
-    } catch (err: any) {
-      setFbTestSuccess(null);
-      setFbConfigStatus(`❌ Lỗi kiểm tra: ${err.message}`);
-    } finally {
-      setIsTestingFb(false);
-    }
-  };
-
-  const handleSaveFbConfig = async () => {
-    let token = fbTokenInput.trim();
-    let pageId = fbPageIdInput.trim() || FacebookApiService.getPageId();
-
-    // Tự động phân giải User Token sang Page Token nếu người dùng dán User Token
-    const pageExtraction = await FacebookApiService.resolvePageTokenIfUserToken(token);
-    if (pageExtraction) {
-      token = pageExtraction.pageToken;
-      pageId = pageExtraction.pageId;
-      setFbTokenInput(token);
-      setFbPageIdInput(pageId);
-    }
-
-    FacebookApiService.setPageToken(token);
-    FacebookApiService.setPageId(pageId);
-    setFbConfigStatus('🎉 Đã lưu cài đặt Fanpage thành công!');
-    
-    // Tự động đồng bộ ngay
-    handleSyncFacebookLive().catch(() => {});
-
-    setTimeout(() => {
-      setShowFbConfigModal(false);
-      setFbConfigStatus(null);
-    }, 1200);
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#F0F2F5] overflow-hidden text-neutral-900 select-none">
-      {/* ========================================================
-          PANCAKE TOP BAR: BRAND, CRM API STATUS & TOOLS
-          ======================================================== */}
-      <div className="h-13 bg-slate-900 text-white px-3 sm:px-5 flex items-center justify-between shrink-0 shadow-sm border-b border-slate-800 select-none">
-        {/* Brand & Status */}
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-xs">
-              <Layers className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-xs tracking-tight text-white">PANCAKE XOĂN</span>
-                <span className="bg-blue-500/20 text-blue-300 text-[9px] font-bold px-1.5 py-0.2 rounded border border-blue-500/30">
-                  STANDALONE APP
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 hidden sm:block">Hộp Thư Đa Kênh & Pancake POS</p>
-            </div>
-          </div>
+    <div className="h-screen w-screen flex flex-col bg-slate-100 overflow-hidden text-slate-900 select-none font-sans">
+      {/* 1. App Header */}
+      <AppHeader
+        activeView={activeView}
+        isSyncingFb={isSyncingFb}
+        onRefreshFb={() => handleSyncFacebookLive(false)}
+        crmStatus={crmStatus}
+        onOpenConfigModal={() => setShowChannelModal(true)}
+      />
 
-          <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+      {/* 2. Main Workspace Layout */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Collapsible Sidebar */}
+        <AppSidebar
+          activeView={activeView}
+          onSelectView={view => {
+            setActiveView(view);
+            if (view === 'channels') {
+              setShowChannelModal(true);
+            }
+          }}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapse}
+          totalUnreadCount={totalUnreadCount}
+          totalOrdersCount={bookings.length}
+          crmStatus={crmStatus}
+          onOpenChannelsModal={() => setShowChannelModal(true)}
+        />
 
-          {/* CRM API Connection Indicator */}
-          <div className="flex items-center gap-2 text-xs">
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1.5 border ${
-                crmStatus === 'connected'
-                  ? 'text-emerald-400 bg-emerald-950/60 border-emerald-500/40'
-                  : 'text-amber-400 bg-amber-950/60 border-amber-500/40'
-              }`}
-              title={`Kết nối REST API máy chủ CRM: ${crmUrl}`}
+        {/* 3. Main Content Router */}
+        {activeView === 'inbox' && (
+          <div className="flex-1 flex min-h-0 overflow-hidden bg-white">
+            {/* Region A: Conversation List */}
+            <ChatConversationList
+              conversations={filteredConversations}
+              activeId={activeId}
+              onSelectConversation={id => {
+                setActiveId(id);
+                setMobileChatView('chat');
+              }}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              filterTab={filterTab}
+              onFilterTabChange={setFilterTab}
+              staffFilter={staffFilter}
+              onStaffFilterChange={setStaffFilter}
+              salesStaff={salesStaff}
+              selectedChannelId={selectedChannelId}
+              onSelectChannelId={setSelectedChannelId}
+              isMobileListVisible={mobileChatView === 'list'}
+            />
+
+            {/* Region B: Chat History & Composer */}
+            <div
+              className={`flex-1 flex flex-col h-full min-w-0 ${
+                mobileChatView === 'chat' ? 'flex' : 'hidden'
+              } md:flex`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${crmStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-              CRM API {crmStatus === 'connected' ? 'Live' : 'Offline'}
-            </span>
-
-            {/* Meta Page Indicator */}
-            <span className="text-slate-400 text-[11px] truncate hidden md:inline">
-              Page: <strong className="text-white">Xoăn Media - Chụp Ảnh Kỷ Yếu</strong>
-            </span>
-          </div>
-        </div>
-
-        {/* Right Tools */}
-        <div className="flex items-center gap-2">
-          {/* Live Auto-Polling Status Badge */}
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-bold select-none shadow-2xs"
-            title="Đang tự động quét và nhảy tin nhắn mới từ Fanpage mỗi 2.5 giây"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="hidden sm:inline">Tự Động Nhảy Tin (2.5s)</span>
-            <span className="sm:hidden">Live 2s</span>
-          </div>
-
-          {/* Deep link button to CRM Xoan */}
-          <a
-            href="https://crm.xoanmedia.com"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 bg-[#B8F23D] hover:bg-[#a6de2f] text-neutral-950 rounded-xl transition-all shadow-xs cursor-pointer active:scale-95"
-            title="Mở ứng dụng CRM Xoăn Media trên tab mới"
-          >
-            <Building2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Mở CRM Xoăn</span>
-            <ExternalLink className="w-3 h-3 opacity-70" />
-          </a>
-
-          {/* Sync Facebook Live */}
-          <button
-            onClick={() => handleSyncFacebookLive(false)}
-            disabled={isSyncingFb}
-            className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
-            title="Bấm để làm mới tin nhắn ngay lập tức"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFb ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{isSyncingFb ? 'Đang tải...' : 'Làm mới'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Facebook Token Error / Sync Warning Banner */}
-      {fbSyncError && (
-        <div className="bg-amber-400 text-neutral-950 px-4 py-2 flex items-center justify-between text-xs font-bold border-b border-amber-500 shadow-xs shrink-0 select-none">
-          <div className="flex items-center gap-2 min-w-0">
-            <AlertCircle className="w-4 h-4 shrink-0 text-amber-950" />
-            <span className="truncate">{fbSyncError}</span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2">
-            <button
-              onClick={handleForceResetToXoanMedia}
-              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs active:scale-95"
-              title="Khôi phục ngay danh sách hội thoại kỷ yếu của Fanpage Xoăn Media"
-            >
-              <RefreshCw className="w-3 h-3" />
-              <span>Nạp Hội Thoại Xoăn Media</span>
-            </button>
-            <button
-              onClick={() => setFbSyncError(null)}
-              className="p-1 hover:bg-amber-500 rounded-md transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4 text-neutral-900" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          PANCAKE WORKSPACE: 4 COLUMNS LAYOUT
-          ======================================================== */}
-      <div className="flex-1 flex min-h-0 overflow-hidden bg-[#F0F2F5]">
-        {/* ----------------------------------------------------
-            CỘT 1: DẢI KÊNH ĐA NỀN TẢNG (OMNICHANNEL RAIL)
-            ---------------------------------------------------- */}
-        <div className="w-14 sm:w-16 bg-slate-950 flex flex-col items-center py-3 space-y-3 shrink-0 border-r border-slate-800 select-none z-10">
-          <span className="text-[9px] font-bold tracking-wider text-slate-500 uppercase">KÊNH</span>
-
-          <div className="flex-1 w-full overflow-y-auto space-y-2.5 px-2 scrollbar-none flex flex-col items-center">
-            {PANCAKE_CHANNELS.map(ch => {
-              const isActive = selectedChannelId === ch.id;
-              const chUnread =
-                ch.id === 'all'
-                  ? conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0)
-                  : conversations
-                      .filter(c => c.channelId === ch.id || c.channel === ch.platform)
-                      .reduce((sum, c) => sum + (c.unreadCount || 0), 0);
-
-              return (
-                <button
-                  key={ch.id}
-                  onClick={() => setSelectedChannelId(ch.id)}
-                  className={`relative group w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center transition-all cursor-pointer ${
-                    isActive
-                      ? 'ring-2 ring-blue-500 bg-white/20 shadow-md scale-105'
-                      : 'hover:bg-white/10 opacity-75 hover:opacity-100 hover:scale-102'
-                  }`}
-                  title={`${ch.name} (${ch.badge})`}
-                >
-                  {ch.id === 'all' ? (
-                    <div className="w-full h-full rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-xs">
-                      ALL
-                    </div>
-                  ) : ch.platform === 'facebook' ? (
-                    <div className="w-full h-full rounded-2xl bg-[#0084FF] flex items-center justify-center text-white shadow-xs">
-                      <MessengerIcon size={20} />
-                    </div>
-                  ) : ch.platform === 'zalo' ? (
-                    <div className="w-full h-full rounded-2xl bg-[#0068FF] flex items-center justify-center text-white font-bold text-xs shadow-xs tracking-tighter">
-                      Zalo
-                    </div>
-                  ) : ch.platform === 'tiktok' ? (
-                    <div className="w-full h-full rounded-2xl bg-neutral-900 border border-white/20 flex items-center justify-center text-white shadow-xs">
-                      <Video className="w-4 h-4 text-rose-400" />
-                    </div>
-                  ) : (
-                    <div className="w-full h-full rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shadow-xs">
-                      <Camera className="w-4 h-4 text-white" />
-                    </div>
-                  )}
-
-                  {chUnread > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white font-bold text-[9px] flex items-center justify-center border-2 border-slate-950 shadow-xs">
-                      {chUnread}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ----------------------------------------------------
-            CỘT 2: DANH SÁCH HỘI THOẠI & BỘ LỌC PANCAKE
-            ---------------------------------------------------- */}
-        <div
-          className={`${
-            mobileView === 'list' ? 'flex' : 'hidden'
-          } md:flex w-full md:w-80 lg:w-88 xl:w-96 bg-white border-r border-black/[0.08] flex-col shrink-0 h-full select-none`}
-        >
-          {/* Header & Filter Controls */}
-          <div className="p-3 border-b border-slate-100 space-y-2.5 bg-slate-50/70">
-            {/* Search Input */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Tìm tên, SĐT, trường, lớp, nội dung..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800 placeholder:text-slate-400 shadow-2xs"
+              <ChatMessageStream
+                activeConv={activeConv}
+                salesStaff={salesStaff}
+                onSendMessage={handleSendMessage}
+                onSendQuoteCard={handleSendQuoteCard}
+                onSendVietQrCard={handleSendVietQrCard}
+                onAssignStaff={handleAssignStaff}
+                showRightPanel={showRightPanel}
+                onToggleRightPanel={() => setShowRightPanel(!showRightPanel)}
+                onMobileBack={() => setMobileChatView('list')}
+                onOpenAiTab={() => {
+                  setShowRightPanel(true);
+                  setRightPanelTab('ai');
+                }}
+                onOpenLightbox={setPreviewLightboxUrl}
+                drafts={drafts}
+                onSaveDraft={handleSaveDraft}
               />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
 
-            {/* Quick Filter Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none text-[11px] font-bold">
-              <button
-                onClick={() => { setFilterTab('all'); setSelectedTagFilter(null); }}
-                className={`px-2.5 py-1 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95 ${
-                  filterTab === 'all' && !selectedTagFilter
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/70'
-                }`}
-              >
-                Tất cả ({conversations.length})
-              </button>
-              <button
-                onClick={() => setFilterTab('unreplied')}
-                className={`px-2 py-1 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95 ${
-                  filterTab === 'unreplied'
-                    ? 'bg-rose-600 text-white shadow-xs'
-                    : 'bg-white text-rose-600 hover:bg-rose-50 border border-rose-200'
-                }`}
-              >
-                Chưa trả lời
-              </button>
-              <button
-                onClick={() => setFilterTab('has_phone')}
-                className={`px-2 py-1 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95 ${
-                  filterTab === 'has_phone'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
-                }`}
-              >
-                Có SĐT
-              </button>
-              <button
-                onClick={() => setFilterTab('deposited')}
-                className={`px-2 py-1 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95 ${
-                  filterTab === 'deposited'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200'
-                }`}
-              >
-                Đã cọc
-              </button>
-            </div>
-          </div>
-
-          {/* Conversation List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {conversations.length === 0 ? (
-              <div className="p-6 text-center text-slate-400 space-y-3 my-auto">
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs border border-blue-100">
-                  <MessageSquare className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-slate-800">Chưa có hội thoại nào</p>
-                  <p className="text-[11px] text-slate-500 mt-1 max-w-[200px] mx-auto leading-relaxed">
-                    Dữ liệu demo đã được xóa sạch. Bấm để tải tin nhắn thật từ Fanpage.
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleSyncFacebookLive(false)}
-                  disabled={isSyncingFb}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-xs transition-all cursor-pointer"
-                >
-                  <RefreshCw size={12} className={isSyncingFb ? 'animate-spin' : ''} />
-                  <span>{isSyncingFb ? 'Đang đồng bộ...' : 'Đồng bộ Facebook'}</span>
-                </button>
+            {/* Region C: Customer Profile, AI Co-pilot & POS */}
+            {showRightPanel && activeConv && (
+              <div className="hidden lg:flex h-full">
+                <ChatRightPanel
+                  activeConv={activeConv}
+                  servicePackages={servicePackages}
+                  aiAnalysis={aiAnalysis}
+                  onUpdateConversation={handleUpdateConversation}
+                  onAiSendReply={handleAiSendReply}
+                  onAddBooking={handleAddBooking}
+                  initialTab={rightPanelTab}
+                />
               </div>
-            ) : filteredConversations.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 space-y-2">
-                <div className="w-10 h-10 mx-auto rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center">
-                  <Search className="w-5 h-5 text-slate-400" />
-                </div>
-                <p className="text-xs font-bold text-slate-700">Không tìm thấy hội thoại phù hợp</p>
-                <p className="text-[11px] text-slate-500">Thử xóa bộ lọc hoặc tìm từ khóa khác</p>
-              </div>
-            ) : (
-              filteredConversations.map(conv => {
-                const isSelected = activeId === conv.id;
-                const stageStyle = conv.pipelineStage ? STAGE_COLORS[conv.pipelineStage] : null;
-
-                return (
-                  <div
-                    key={conv.id}
-                    onClick={() => {
-                      setActiveId(conv.id);
-                      setMobileView('chat');
-                    }}
-                    className={`p-3 cursor-pointer transition-all border-l-[3.5px] ${
-                      isSelected
-                        ? 'bg-blue-50/80 border-l-blue-600 shadow-2xs'
-                        : 'bg-white hover:bg-slate-50/80 border-l-transparent'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2.5">
-                      {/* Avatar */}
-                      <div className="relative shrink-0">
-                        <img
-                          src={conv.customerAvatar}
-                          alt={conv.customerName}
-                          className="w-10 h-10 rounded-full object-cover border border-slate-200"
-                        />
-                        {conv.channel === 'facebook' && (
-                          <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#0084FF] text-white flex items-center justify-center p-0.5 border border-white">
-                            <MessengerIcon size={10} />
-                          </span>
-                        )}
-                        {conv.channel === 'zalo' && (
-                          <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#0068FF] text-white font-bold text-[7px] flex items-center justify-center border border-white">
-                            Z
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <h4 className="text-xs font-bold text-slate-900 truncate">
-                            {conv.customerName}
-                          </h4>
-                          <span className="text-[10px] text-slate-400 font-medium shrink-0 ml-1">
-                            {conv.lastMessageTime}
-                          </span>
-                        </div>
-
-                        {/* Class / School */}
-                        {(conv.customerClass || conv.customerSchool) && (
-                          <p className="text-[10px] text-slate-500 font-medium truncate mb-1">
-                            {conv.customerClass} {conv.customerSchool ? `• ${conv.customerSchool}` : ''}
-                          </p>
-                        )}
-
-                        {/* Last message snippet */}
-                        <p className={`text-[11px] truncate mb-1.5 ${conv.unreadCount > 0 ? 'font-bold text-slate-900' : 'text-slate-600'}`}>
-                          {conv.lastMessage}
-                        </p>
-
-                        {/* Tags & Badges */}
-                        <div className="flex flex-wrap items-center gap-1">
-                          {stageStyle && conv.pipelineStage && (
-                            <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${stageStyle.bg} ${stageStyle.text} ${stageStyle.border}`}>
-                              {conv.pipelineStage}
-                            </span>
-                          )}
-
-                          {conv.assignedSalesName && conv.assignedSalesName.includes('AI') && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-0.5 animate-pulse">
-                              <Bot className="w-2.5 h-2.5 text-purple-600" />
-                              <span>AI Auto</span>
-                            </span>
-                          )}
-
-                          {conv.tags.slice(0, 2).map((t, idx) => (
-                            <span key={idx} className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Unread dot */}
-                      {conv.unreadCount > 0 && (
-                        <div className="shrink-0 flex flex-col items-end">
-                          <span className="w-5 h-5 rounded-full bg-rose-600 text-white font-black text-[10px] flex items-center justify-center">
-                            {conv.unreadCount}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
-        </div>
+        )}
 
-        {/* ----------------------------------------------------
-            CỘT 3: KHUNG CHAT CHI TIẾT (CHAT ENGINE)
-            ---------------------------------------------------- */}
-        <div
-          className={`${
-            mobileView === 'chat' ? 'flex' : 'hidden'
-          } md:flex flex-1 flex-col h-full bg-slate-100/60 min-w-0 border-r border-slate-200/80`}
-        >
-          {activeConv ? (
-            <>
-              {/* Chat Header */}
-              <div className="h-14 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between shrink-0 shadow-2xs">
-                <div className="flex items-center gap-3 min-w-0">
-                  <button
-                    onClick={() => setMobileView('list')}
-                    className="md:hidden p-1.5 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                  </button>
-
-                  <div className="relative shrink-0">
-                    <img
-                      src={activeConv.customerAvatar}
-                      alt={activeConv.customerName}
-                      className="w-10 h-10 rounded-full object-cover border border-slate-200 ring-2 ring-white"
-                    />
-                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white ring-1 ring-emerald-500/30" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-sm text-slate-900 truncate tracking-tight">
-                        {activeConv.customerName}
-                      </h3>
-                      {activeConv.customerPhone && (
-                        <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 font-mono shadow-2xs">
-                          {activeConv.customerPhone}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500 truncate mt-0.5">
-                      <span>Kênh: <strong className="text-slate-700">{activeConv.pageName || 'Fanpage Xoăn Media'}</strong></span>
-                      <span>•</span>
-                      <span>Phụ trách:</span>
-                      <div className="relative inline-block">
-                        <button
-                          type="button"
-                          onClick={() => setShowAssignStaffMenu(!showAssignStaffMenu)}
-                          className={`font-semibold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
-                            activeConv.assignedSalesName.includes('AI')
-                              ? 'bg-purple-100 text-purple-800 border border-purple-300 animate-pulse'
-                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
-                          }`}
-                          title="Bấm để phân công nhân sự hoặc giao cho AI tự động chat"
-                        >
-                          {activeConv.assignedSalesName.includes('AI') && <Bot className="w-3 h-3 text-purple-600" />}
-                          <span>{activeConv.assignedSalesName}</span>
-                          <ChevronDown className="w-3 h-3 opacity-60" />
-                        </button>
-
-                        {/* Dropdown menu chọn nhân sự / AI */}
-                        {showAssignStaffMenu && (
-                          <div className="absolute top-full left-0 mt-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-40 animate-in fade-in">
-                            <p className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                              Phân công hội thoại
-                            </p>
-                            {salesStaff.map(s => {
-                              const isCurrent = activeConv.assignedSalesName === s.name;
-                              const isAi = s.name.includes('AI');
-                              return (
-                                <button
-                                  key={s.id}
-                                  type="button"
-                                  onClick={() => {
-                                    handleAssignStaff(activeConv.id, s.name);
-                                    setShowAssignStaffMenu(false);
-                                  }}
-                                  className={`w-full px-3 py-1.5 text-left text-xs font-semibold flex items-center justify-between transition-colors ${
-                                    isCurrent ? 'bg-blue-50 text-blue-700' : 'hover:bg-slate-50 text-slate-700'
-                                  }`}
-                                >
-                                  <span className={`flex items-center gap-1.5 ${isAi ? 'text-purple-700 font-bold' : ''}`}>
-                                    {isAi ? <Bot className="w-3.5 h-3.5 text-purple-600" /> : <User className="w-3.5 h-3.5 text-slate-400" />}
-                                    {s.name}
-                                  </span>
-                                  {isCurrent && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowRightPanel(!showRightPanel)}
-                    className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all cursor-pointer active:scale-95 border border-slate-200/60"
-                    title={showRightPanel ? 'Thu gọn panel POS' : 'Mở panel POS & Khách hàng'}
-                  >
-                    {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Chat Message Stream */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-3.5">
-                {activeConv.messages
-                  .filter((msg, idx, arr) => {
-                    if (idx === 0) return true;
-                    const prev = arr[idx - 1];
-                    if (msg.id && prev.id && msg.id === prev.id) return false;
-                    const isSameSender = msg.sender === prev.sender;
-                    const isSameText = (msg.text || '').trim() === (prev.text || '').trim() && (msg.text || '').trim() !== '';
-                    const isSameMinute = msg.timestamp === prev.timestamp;
-                    if (isSameSender && isSameText && isSameMinute) return false;
-                    return true;
-                  })
-                  .map((msg, index) => {
-                  const isSales = msg.sender === 'sales';
-
-                  return (
-                    <div
-                      key={msg.id || index}
-                      className={`flex flex-col ${isSales ? 'items-end' : 'items-start'}`}
-                    >
-                      <div className="flex items-end gap-2 max-w-[85%] sm:max-w-[75%]">
-                        {!isSales && (
-                          <img
-                            src={activeConv.customerAvatar}
-                            alt=""
-                            className="w-7 h-7 rounded-full object-cover shrink-0 mb-1 border border-slate-200 shadow-2xs"
-                          />
-                        )}
-
-                        <div
-                          className={`rounded-2xl px-4 py-2.5 text-xs sm:text-[13px] leading-relaxed shadow-2xs transition-all ${
-                            isSales
-                              ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-br-xs font-normal'
-                              : 'bg-white text-slate-800 border border-slate-200/80 rounded-bl-xs'
-                          }`}
-                        >
-                          {msg.text && <p className="whitespace-pre-wrap">{msg.text}</p>}
-
-                          {/* Image Attachments */}
-                          {msg.attachments && msg.attachments.length > 0 && (
-                            <div className={`flex flex-wrap gap-2 ${msg.text ? 'mt-2.5' : ''}`}>
-                              {msg.attachments.map((att, attIdx) => (
-                                <div key={attIdx} className="relative group rounded-xl overflow-hidden shadow-xs border border-black/10">
-                                  <img
-                                    src={att.url}
-                                    alt="Hình ảnh đính kèm"
-                                    onClick={() => setPreviewLightboxUrl(att.url)}
-                                    className="max-h-64 max-w-full sm:max-w-xs object-cover cursor-pointer hover:scale-102 transition-transform duration-200"
-                                    loading="lazy"
-                                  />
-                                  <div
-                                    onClick={() => setPreviewLightboxUrl(att.url)}
-                                    className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer text-white text-xs font-bold gap-1"
-                                  >
-                                    <span>🔍 Phóng to</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Card: Quote */}
-                          {msg.cardType === 'quote' && msg.cardData && (
-                            <div className="mt-2.5 p-3 rounded-xl bg-white text-neutral-900 border border-blue-200 shadow-xs space-y-2">
-                              <div className="flex items-center justify-between border-b border-neutral-100 pb-1.5">
-                                <span className="font-black text-xs text-blue-700">📸 BÁO GIÁ KỶ YẾU</span>
-                                <span className="text-[10px] bg-blue-50 text-blue-700 font-extrabold px-1.5 py-0.5 rounded">
-                                  {msg.cardData.studentCount} Học Sinh
-                                </span>
-                              </div>
-                              <div className="space-y-1 text-[11px]">
-                                <div className="flex justify-between">
-                                  <span className="text-neutral-500">Gói chụp:</span>
-                                  <span className="font-bold">{msg.cardData.packageName}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-neutral-500">Tổng chi phí:</span>
-                                  <span className="font-black text-blue-700">
-                                    {(msg.cardData.totalAmount || 0).toLocaleString('vi-VN')} đ
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Card: VietQR */}
-                          {msg.cardType === 'vietqr' && msg.cardData && (
-                            <div className="mt-2.5 p-3 rounded-xl bg-white text-neutral-900 border border-emerald-200 shadow-xs space-y-2">
-                              <div className="flex items-center justify-between border-b border-neutral-100 pb-1.5">
-                                <span className="font-black text-xs text-emerald-700">💳 VIETQR CHUYỂN KHOẢN CỌC</span>
-                                <span className="text-[10px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded">
-                                  MB BANK
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-center p-2 bg-neutral-50 rounded-lg">
-                                <img
-                                  src={`https://img.vietqr.io/image/MB-09876543210-compact2.png?amount=${msg.cardData.depositAmount}&addInfo=${encodeURIComponent(msg.cardData.transferSyntax || '')}&accountName=TA%20VAN%20DUY`}
-                                  alt="VietQR"
-                                  className="w-40 h-auto rounded border"
-                                />
-                              </div>
-                              <div className="space-y-1 text-[11px]">
-                                <div className="flex justify-between">
-                                  <span className="text-neutral-500">Tiền cọc:</span>
-                                  <span className="font-black text-emerald-700">
-                                    {(msg.cardData.depositAmount || 0).toLocaleString('vi-VN')} đ
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-neutral-500">Nội dung CK:</span>
-                                  <code className="font-bold text-neutral-800">{msg.cardData.transferSyntax}</code>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Card: Booking Success */}
-                          {msg.cardType === 'booking_success' && msg.cardData && (
-                            <div className="mt-2.5 p-3 rounded-xl bg-emerald-50 text-neutral-900 border border-emerald-300 shadow-xs space-y-1.5">
-                              <div className="flex items-center gap-1.5 text-emerald-800 font-black text-xs">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                <span>ĐƠN BOOKING ĐÃ KHÓA TRÊN CRM</span>
-                              </div>
-                              <p className="text-[11px] font-mono text-emerald-900">
-                                Mã đơn: <strong>{msg.cardData.bookingCode}</strong> • Ngày chụp: <strong>{msg.cardData.shootDate}</strong>
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <span className="text-[9px] text-neutral-400 mt-0.5 px-1">
-                        {msg.timestamp}
-                      </span>
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Chat Input Toolbar & Action Buttons */}
-              <div className="p-3 bg-white border-t border-slate-200/80 space-y-2.5">
-                {/* 1-Tap Action Pills */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200/80 transition-all shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                    title="Chọn file ảnh từ máy tính hoặc dán ảnh (Ctrl+V) vào ô chat"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Gửi ảnh</span>
-                  </button>
-
-                  <button
-                    onClick={handleSendQuoteCard}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold border border-blue-200/80 transition-all shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                  >
-                    <DollarSign className="w-3.5 h-3.5" />
-                    <span>Báo giá nhanh</span>
-                  </button>
-
-                  <button
-                    onClick={handleSendVietQrCard}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold border border-emerald-200/80 transition-all shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                  >
-                    <QrCode className="w-3.5 h-3.5" />
-                    <span>Gửi VietQR cọc</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowQuickReplyPopup(!showQuickReplyPopup);
-                      setQuickReplyFilter('');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold border border-amber-200/80 transition-all shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Kịch bản (/)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowRightPanel(true);
-                      setRightPanelTab('ai');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-500/15 to-indigo-500/15 hover:from-purple-500/25 hover:to-indigo-500/25 text-purple-700 font-bold border border-purple-200 transition-all shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                    title="Mở bảng phân tích và gợi ý câu trả lời của Trợ Lý AI"
-                  >
-                    <Bot className="w-3.5 h-3.5 text-purple-600 animate-pulse" />
-                    <span>Trợ Lý AI</span>
-                  </button>
-                </div>
-
-                {/* Image Upload Preview Bar */}
-                {selectedImagePreview && (
-                  <div className="flex items-center gap-2.5 p-2.5 bg-blue-50/90 border border-blue-200 rounded-xl animate-in fade-in">
-                    <img
-                      src={selectedImagePreview}
-                      alt="Ảnh chuẩn bị gửi"
-                      className="w-12 h-12 rounded-lg object-cover border border-blue-300 shadow-2xs shrink-0"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-bold text-blue-900 truncate">
-                        {selectedImageFile?.name || 'Ảnh đính kèm'}
-                      </p>
-                      <p className="text-[10px] text-blue-600">
-                        Sẵn sàng gửi qua Facebook Messenger (Nhấn Gửi hoặc Enter)
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedImageFile(null);
-                        setSelectedImagePreview(null);
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                      title="Gỡ ảnh này"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-
-                {/* Input Text Form */}
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleImageFileChange}
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer shrink-0 border border-slate-200 bg-slate-50 active:scale-95 shadow-2xs"
-                    title="Chọn ảnh từ máy tính hoặc chụp ảnh (Có thể dán Ctrl+V)"
-                  >
-                    <ImageIcon className="w-4 h-4" />
-                  </button>
-
-                  <input
-                    type="text"
-                    placeholder="Nhập tin nhắn... (Dán ảnh Ctrl+V hoặc gõ / để mở mẫu nhanh)"
-                    value={inputText}
-                    onPaste={handlePasteInChat}
-                    onChange={e => {
-                      setInputText(e.target.value);
-                      if (e.target.value.startsWith('/')) {
-                        setShowQuickReplyPopup(true);
-                        setQuickReplyFilter(e.target.value.slice(1).toLowerCase());
-                      } else {
-                        setShowQuickReplyPopup(false);
-                      }
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        // Chống kích hoạt đúp khi bộ gõ tiếng Việt Telex/VNI đang kết thúc từ
-                        if (e.nativeEvent.isComposing) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleSendMessage();
-                      }
-                    }}
-                    className="flex-1 px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all text-slate-800 placeholder:text-slate-400 shadow-2xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={e => {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }}
-                    disabled={!inputText.trim() && !selectedImageFile}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl font-bold text-xs shadow-sm shadow-blue-500/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Gửi</span>
-                  </button>
-                </div>
-
-                {/* Slash Popup */}
-                {showQuickReplyPopup && (
-                  <div className="p-2 bg-white rounded-2xl shadow-xl border border-black/10 max-h-56 overflow-y-auto space-y-1">
-                    <p className="text-[10px] font-black text-neutral-400 px-2 py-0.5 uppercase tracking-wider">
-                      MẪU TIN NHẮN NHANH ({PANCAKE_QUICK_SCRIPTS.length})
-                    </p>
-                    {PANCAKE_QUICK_SCRIPTS.map(s => (
-                      <div
-                        key={s.id}
-                        onClick={() => {
-                          setInputText(s.text);
-                          setShowQuickReplyPopup(false);
-                        }}
-                        className="p-2 hover:bg-neutral-50 rounded-xl cursor-pointer text-xs"
-                      >
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="font-bold text-blue-700">{s.title}</span>
-                          <code className="text-[10px] text-neutral-400 font-mono">{s.code}</code>
-                        </div>
-                        <p className="text-[11px] text-neutral-600 line-clamp-1">{s.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-neutral-50/40 select-none">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20 mb-4">
-                <MessengerIcon size={32} />
-              </div>
-              <h3 className="text-base font-bold text-neutral-800 mb-1">Pancake Xoăn Media</h3>
-              <p className="text-xs text-neutral-500 max-w-sm mb-5 leading-relaxed">
-                Toàn bộ dữ liệu demo mẫu đã được dọn sạch. Bạn hãy đồng bộ để tải các cuộc trò chuyện thực tế từ Fanpage Facebook hoặc cấu hình kênh.
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleSyncFacebookLive(false)}
-                  disabled={isSyncingFb}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
-                >
-                  <RefreshCw size={14} className={isSyncingFb ? 'animate-spin' : ''} />
-                  <span>{isSyncingFb ? 'Đang tải tin nhắn...' : '⚡ Đồng bộ tin nhắn Fanpage'}</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ----------------------------------------------------
-            CỘT 4: PANCAKE POS & HỒ SƠ KHÁCH HÀNG (RIGHT PANEL)
-            ---------------------------------------------------- */}
-        {showRightPanel && activeConv && (
-          <div className="w-80 lg:w-96 bg-white border-l border-slate-200/80 flex flex-col h-full shrink-0 select-none">
-            {/* Tab Header */}
-            <div className="p-2.5 bg-slate-50 border-b border-slate-200/80">
-              <div className="p-1 bg-slate-200/60 rounded-xl flex gap-1 text-[11px] font-bold">
-                <button
-                  onClick={() => setRightPanelTab('customer')}
-                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 ${
-                    rightPanelTab === 'customer'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <User className="w-3.5 h-3.5" />
-                  <span>Hồ Sơ</span>
-                </button>
-                <button
-                  onClick={() => setRightPanelTab('ai')}
-                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 ${
-                    rightPanelTab === 'ai'
-                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs font-bold'
-                      : 'text-purple-700 hover:text-purple-900 hover:bg-purple-50/50'
-                  }`}
-                >
-                  <Bot className="w-3.5 h-3.5" />
-                  <span>Trợ Lý AI</span>
-                </button>
-                <button
-                  onClick={() => setRightPanelTab('pos')}
-                  className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer active:scale-95 ${
-                    rightPanelTab === 'pos'
-                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <ShoppingBag className="w-3.5 h-3.5" />
-                  <span>POS</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Panel Body */}
-            <div className="flex-1 overflow-y-auto p-4 text-xs space-y-4">
-              {posSuccessMsg && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-bold flex items-center gap-2 animate-in fade-in">
-                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{posSuccessMsg}</span>
-                </div>
-              )}
-
-              {/* TAB AI: TRỢ LÝ AI TỰ ĐỘNG CHAT & CO-PILOT */}
-              {rightPanelTab === 'ai' && (
-                <div className="space-y-4 animate-in fade-in">
-                  {/* Status & Auto-pilot Switch */}
-                  <div className={`p-3.5 rounded-2xl border transition-all ${
-                    activeConv.assignedSalesName.includes('AI')
-                      ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200 shadow-2xs'
-                      : 'bg-slate-50 border-slate-200'
-                  }`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-xs ${
-                          activeConv.assignedSalesName.includes('AI')
-                            ? 'bg-gradient-to-tr from-purple-600 to-indigo-600 animate-pulse'
-                            : 'bg-slate-400'
-                        }`}>
-                          <Bot className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-slate-900 text-xs">Ủy Quyền Cho AI Chat</p>
-                          <p className="text-[10px] text-slate-500">
-                            {activeConv.assignedSalesName.includes('AI')
-                              ? '🤖 Đang bật: AI tự động tư vấn 24/7'
-                              : 'Chế độ thủ công (Nhân viên tư vấn)'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Toggle button */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextStaff = activeConv.assignedSalesName.includes('AI')
-                            ? 'Duy Kool (Admin)'
-                            : '🤖 Bot AI Tư Vấn (Auto)';
-                          handleAssignStaff(activeConv.id, nextStaff);
-                        }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs active:scale-95 ${
-                          activeConv.assignedSalesName.includes('AI')
-                            ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                            : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
-                        }`}
-                      >
-                        {activeConv.assignedSalesName.includes('AI') ? 'Đang Bật' : 'Bật AI'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* AI Customer Insights */}
-                  <div className="p-3.5 bg-white border border-slate-200 rounded-2xl space-y-2.5 shadow-2xs">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <div className="flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                        <span className="font-bold text-xs text-slate-900">Thấu Hiểu Khách Hàng (Insight)</span>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                        aiAnalysis.interestLevel.includes('Hot')
-                          ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                          : aiAnalysis.interestLevel.includes('Warm')
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : 'bg-slate-100 text-slate-600 border border-slate-200'
-                      }`}>
-                        {aiAnalysis.interestLevel}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5 text-[11px]">
-                      <div>
-                        <span className="text-slate-500 font-medium">Ý định khách: </span>
-                        <span className="font-semibold text-slate-800">{aiAnalysis.customerIntent}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 font-medium">Tâm lý / Gu: </span>
-                        <span className="text-slate-700">{aiAnalysis.customerPersonality}</span>
-                      </div>
-                      {(aiAnalysis.detectedSchool || aiAnalysis.detectedClass || aiAnalysis.detectedPhone) && (
-                        <div className="pt-1.5 flex flex-wrap gap-1.5">
-                          {aiAnalysis.detectedSchool && (
-                            <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-800 font-bold border border-blue-200 text-[10px]">
-                              🏫 {aiAnalysis.detectedSchool}
-                            </span>
-                          )}
-                          {aiAnalysis.detectedClass && (
-                            <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-800 font-bold border border-indigo-200 text-[10px]">
-                              🏷️ Lớp {aiAnalysis.detectedClass}
-                            </span>
-                          )}
-                          {aiAnalysis.detectedPhone && (
-                            <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 font-mono font-bold border border-emerald-200 text-[10px]">
-                              📞 {aiAnalysis.detectedPhone}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {aiInsightSuccess && (
-                      <p className="text-[10px] text-emerald-700 font-bold animate-in fade-in">
-                        {aiInsightSuccess}
-                      </p>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={handleApplyAiInsights}
-                      className="w-full py-2 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-800 font-bold rounded-xl transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200"
-                    >
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Đồng Bộ Sang Hồ Sơ CRM (1-Click)</span>
-                    </button>
-                  </div>
-
-                  {/* Smart Reply Suggestions */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-1">
-                      <span className="font-bold text-xs text-slate-900">Gợi Ý Trả Lời Chuẩn Xoăn Media</span>
-                      <span className="text-[10px] text-slate-400">Chọn để gửi nhanh</span>
-                    </div>
-
-                    <div className="space-y-2">
-                      {aiAnalysis.suggestedReplies.map((reply, rIdx) => (
-                        <div
-                          key={rIdx}
-                          className="p-3 bg-white hover:bg-purple-50/30 border border-slate-200 hover:border-purple-300 rounded-2xl transition-all shadow-2xs space-y-2 group"
-                        >
-                          <p className="text-[11px] text-slate-800 leading-relaxed">
-                            {reply}
-                          </p>
-                          <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setInputText(reply);
-                              }}
-                              className="px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                            >
-                              Chèn vào ô chat
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAiSendReply(reply)}
-                              className="px-3 py-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all shadow-2xs active:scale-95 flex items-center gap-1 cursor-pointer"
-                            >
-                              <Send className="w-2.5 h-2.5" />
-                              <span>Gửi ngay</span>
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Trigger Auto Reply Button */}
-                  <button
-                    type="button"
-                    disabled={isAiReplying}
-                    onClick={() => {
-                      if (aiAnalysis.suggestedReplies[0]) {
-                        handleAiSendReply(aiAnalysis.suggestedReplies[0]);
-                      }
-                    }}
-                    className="w-full py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:opacity-95 text-white rounded-xl font-bold text-xs shadow-md shadow-purple-500/20 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>{isAiReplying ? 'Đang gửi...' : '🚀 Cho AI Phản Hồi Ngay Tin Nhắn Này'}</span>
-                  </button>
-                </div>
-              )}
-
-              {/* TAB 1: CUSTOMER PROFILE */}
-              {rightPanelTab === 'customer' && (
-                <div className="space-y-4">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Tên khách hàng</label>
-                      <input
-                        type="text"
-                        value={editCustName}
-                        onChange={e => setEditCustName(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Số điện thoại</label>
-                      <input
-                        type="text"
-                        value={editCustPhone}
-                        onChange={e => setEditCustPhone(e.target.value)}
-                        placeholder="Chưa có SĐT"
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all placeholder:text-slate-400"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-700 block mb-1">Lớp</label>
-                        <input
-                          type="text"
-                          value={editCustClass}
-                          onChange={e => setEditCustClass(e.target.value)}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-700 block mb-1">Trường học</label>
-                        <input
-                          type="text"
-                          value={editCustSchool}
-                          onChange={e => setEditCustSchool(e.target.value)}
-                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Ghi chú tư vấn</label>
-                      <textarea
-                        rows={3}
-                        value={noteText}
-                        onChange={e => setNoteText(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none text-[11px] transition-all"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleSaveCustomerInfo}
-                      className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] text-white rounded-xl font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Lưu Hồ Sơ Khách Hàng Vào CRM</span>
-                    </button>
-                  </div>
-
-                  {/* Deep link button to CRM */}
-                  <div className="pt-3 border-t border-slate-100 space-y-2">
-                    <a
-                      href="https://crm.xoanmedia.com"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="w-full py-2 bg-blue-50 hover:bg-blue-100 active:scale-[0.98] text-blue-700 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all border border-blue-200 shadow-2xs"
-                    >
-                      <Building2 className="w-3.5 h-3.5" />
-                      <span>Mở Khách Hàng Trên CRM 360°</span>
-                      <ExternalLink className="w-3.5 h-3.5 opacity-70" />
-                    </a>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: PANCAKE POS */}
-              {rightPanelTab === 'pos' && (
-                <form onSubmit={handleCreatePosBooking} className="space-y-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">Chọn gói kỷ yếu</label>
-                    <select
-                      value={posSelectedPackage}
-                      onChange={e => {
-                        setPosSelectedPackage(e.target.value);
-                        const match = servicePackages.find(p => p.name === e.target.value);
-                        if (match) setPosPackagePrice(match.price);
-                      }}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-800 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                    >
-                      {servicePackages.map(p => (
-                        <option key={p.id} value={p.name}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Sĩ số (bạn)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={posStudentCount}
-                        onChange={e => setPosStudentCount(Number(e.target.value) || 1)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-center text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Đơn giá/bạn</label>
-                      <input
-                        type="number"
-                        step={1000}
-                        value={posPackagePrice}
-                        onChange={e => setPosPackagePrice(Number(e.target.value) || 0)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-right text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-amber-800 font-bold">Tổng doanh thu dự kiến:</span>
-                      <span className="font-bold text-amber-900 text-sm">
-                        {(posStudentCount * posPackagePrice).toLocaleString('vi-VN')} đ
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Tiền cọc (đ)</label>
-                      <input
-                        type="number"
-                        step={100000}
-                        value={posDepositAmount}
-                        onChange={e => setPosDepositAmount(Number(e.target.value) || 0)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-bold font-mono text-emerald-700 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Ngày chụp</label>
-                      <input
-                        type="date"
-                        value={posShootDate}
-                        onChange={e => setPosShootDate(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">Địa điểm chụp</label>
-                    <input
-                      type="text"
-                      value={posLocation}
-                      onChange={e => setPosLocation(e.target.value)}
-                      placeholder="Ví dụ: Hoàng Thành Thăng Long"
-                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all placeholder:text-slate-400"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-[0.98] text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Tạo Booking & Bắn Vào CRM Xoăn</span>
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
+        {/* 4. Orders View */}
+        {activeView === 'orders' && (
+          <OrdersView
+            bookings={bookings}
+            servicePackages={servicePackages}
+            onAddBooking={handleAddBooking}
+            onOpenCustomerChat={() => {
+              setActiveView('inbox');
+            }}
+          />
         )}
       </div>
 
-      {/* ========================================================
-          MODAL CÀI ĐẶT KẾT NỐI FANPAGE FACEBOOK & WEBHOOK
-          ======================================================== */}
-      {showFbConfigModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-xl w-full shadow-2xl border border-black/10 overflow-hidden flex flex-col max-h-[92vh]">
-            {/* Header */}
-            <div className="px-5 py-4 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-white shadow-xs">
-                  <MessengerIcon size={24} />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm tracking-tight text-white flex items-center gap-2">
-                    Kết Nối Fanpage Facebook & Webhook
-                    <span className="text-[10px] bg-amber-400 text-neutral-900 font-extrabold px-1.5 py-0.5 rounded">
-                      Meta Graph API
-                    </span>
-                  </h3>
-                  <p className="text-xs text-blue-100">Đồng bộ tin nhắn & khách hàng tự động với Pancake</p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setShowFbConfigModal(false);
-                  setFbConfigStatus(null);
-                }}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* 5. Modal Cài Đặt Fanpage & Webhook */}
+      <ChannelConfigModal
+        isOpen={showChannelModal}
+        onClose={() => setShowChannelModal(false)}
+        onSyncFacebookLive={() => handleSyncFacebookLive(false)}
+      />
 
-            {/* Body */}
-            <div className="p-5 overflow-y-auto space-y-4 text-xs">
-              {/* Meta App Info */}
-              <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-extrabold text-neutral-900 text-xs">Meta App: Crm-xoan-media</span>
-                    <span className="bg-blue-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded">
-                      ĐÃ KẾT NỐI
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-neutral-600 mt-0.5">
-                    App ID: <code className="font-mono text-blue-700 font-bold">{FacebookApiService.getAppId()}</code> • Khóa bí mật: <code className="font-mono text-neutral-500">aea735...83be</code>
-                  </p>
-                </div>
-                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded-lg border border-emerald-300 flex items-center gap-1 shrink-0">
-                  <Check className="w-3 h-3 text-emerald-600" /> Xác Thực OK
-                </span>
-              </div>
-
-              {/* Form Input */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-black text-neutral-800 mb-1">
-                    1. ID Fanpage (Facebook Page ID) <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={fbPageIdInput}
-                    onChange={e => setFbPageIdInput(e.target.value)}
-                    placeholder="Ví dụ: 100083303952726"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-black/10 bg-neutral-50 font-mono text-xs"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-black text-neutral-800 mb-1">
-                    2. Mã Truy Cập Trang (Page Access Token) <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={fbTokenInput}
-                    onChange={e => setFbTokenInput(e.target.value)}
-                    placeholder="Dán chuỗi Token vĩnh viễn bắt đầu bằng EAA..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-black/10 bg-neutral-50 font-mono text-[11px] resize-none break-all"
-                  />
-                </div>
-              </div>
-
-              {/* Test Result */}
-              {fbTestSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
-                  <div className="flex items-center gap-3">
-                    {fbTestSuccess.pictureUrl ? (
-                      <img src={fbTestSuccess.pictureUrl} alt={fbTestSuccess.name} className="w-10 h-10 rounded-full border border-emerald-300 shrink-0" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-black flex items-center justify-center text-sm shrink-0">FB</div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="font-black text-neutral-900 text-xs truncate">{fbTestSuccess.name}</p>
-                      <p className="text-[11px] text-emerald-700 font-mono truncate">ID: {fbTestSuccess.id} • Đã kết nối hợp lệ</p>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-black shrink-0">
-                      Live OK
-                    </span>
-                  </div>
-
-                  <div className="pt-2 border-t border-emerald-200/60 flex flex-wrap items-center gap-2 text-[10px]">
-                    <span className="px-2 py-0.5 rounded bg-white text-emerald-800 border border-emerald-200 font-bold">
-                      {fbTestSuccess.isNeverExpires ? '🕒 Hạn: Vĩnh viễn (Never Expires)' : '🕒 Hạn: Tạm thời'}
-                    </span>
-                    {fbTestSuccess.scopes && fbTestSuccess.scopes.map(s => (
-                      <span key={s} className="px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-800 font-mono">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {fbConfigStatus && (
-                <div className={`p-3 rounded-2xl text-xs font-semibold flex items-center gap-2 ${
-                  fbConfigStatus.includes('Lỗi') || fbConfigStatus.includes('❌')
-                    ? 'bg-rose-50 border border-rose-200 text-rose-800'
-                    : 'bg-emerald-50 border border-emerald-200 text-emerald-800'
-                }`}>
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{fbConfigStatus}</span>
-                </div>
-              )}
-
-              {/* Webhook Configuration Info */}
-              <div className="p-3.5 bg-neutral-50 border border-neutral-200 rounded-2xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-black text-neutral-800 text-xs">⚡ Cấu Hình Webhook (Tin Nhắn Realtime)</span>
-                    <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded">TỨC THÌ</span>
-                  </div>
-                  <a
-                    href="https://developers.facebook.com/docs/messenger-platform/webhooks"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 text-[11px]"
-                  >
-                    Tài liệu Webhook <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-                <div className="space-y-1.5 bg-white p-2.5 rounded-xl border border-black/5 font-mono text-[11px]">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <span className="text-neutral-500 font-sans">Callback URL:</span>
-                    <code className="text-blue-700 font-bold select-all break-all">https://crm.xoanmedia.com/api/facebook/webhook</code>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <span className="text-neutral-500 font-sans">Verify Token:</span>
-                    <code className="text-emerald-700 font-bold select-all">xoanmedia_meta_webhook_2026</code>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-neutral-500 font-sans">Trường đăng ký:</span>
-                    <span className="text-neutral-700 font-sans font-semibold">messages, messaging_postbacks</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="px-5 py-3.5 bg-neutral-50 border-t border-black/[0.06] flex items-center justify-between shrink-0">
-              <button
-                type="button"
-                onClick={handleTestFbConnection}
-                disabled={isTestingFb}
-                className="px-3.5 py-2 text-xs font-bold text-neutral-800 bg-white hover:bg-neutral-100 rounded-xl border border-neutral-200 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {isTestingFb ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-500" />}
-                <span>⚡ Kiểm Tra & Tự Kích Hoạt Token Vĩnh Viễn</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowFbConfigModal(false);
-                    setFbConfigStatus(null);
-                  }}
-                  className="px-4 py-2 text-xs font-bold text-neutral-600 hover:bg-neutral-200 rounded-xl transition-colors cursor-pointer"
-                >
-                  Đóng
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveFbConfig}
-                  className="px-4 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Lưu Cấu Hình</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Image Lightbox Preview Modal */}
+      {/* 6. Lightbox Preview Hình Ảnh */}
       {previewLightboxUrl && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in cursor-zoom-out"
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in cursor-zoom-out"
           onClick={() => setPreviewLightboxUrl(null)}
         >
           <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
@@ -2390,13 +672,12 @@ export default function App() {
               src={previewLightboxUrl}
               alt="Phóng to ảnh"
               className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl select-none"
-              onClick={(e) => e.stopPropagation()}
+              onClick={e => e.stopPropagation()}
             />
             <button
               type="button"
               onClick={() => setPreviewLightboxUrl(null)}
-              className="absolute top-2 right-2 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white transition-colors cursor-pointer"
-              title="Đóng xem ảnh"
+              className="absolute top-2 right-2 p-2 rounded-full bg-slate-900/70 hover:bg-slate-900 text-white transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -2404,5 +685,13 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <PancakeAppContent />
+    </ToastProvider>
   );
 }
